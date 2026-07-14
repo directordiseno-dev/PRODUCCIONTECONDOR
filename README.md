@@ -11,6 +11,11 @@ Configura en Production y Preview:
 
 Son las mismas variables publicas de la aplicacion principal.
 
+Despues de crear o actualizar estas variables, genera un nuevo despliegue de
+Production: Vercel solo incorpora los valores en despliegues nuevos. No uses la
+clave `service_role`; la aplicacion cliente debe usar la clave publica de
+Supabase.
+
 ## Desarrollo
 
 ```bash
