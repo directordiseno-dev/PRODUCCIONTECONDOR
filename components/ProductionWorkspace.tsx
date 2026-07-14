@@ -1081,8 +1081,13 @@ function SelectField({
 }
 
 function productionEmployeeOptions(employees: ProductionEmployeeOption[]): Array<[string, string]> {
-  const roleOrder = ["operario", "ingeniero", "supervisor", "logistica", "administrativo"];
+  const roleOrder = ["operario", "ingeniero"];
   return [...employees]
+    .map((employee) => ({
+      ...employee,
+      roles: employee.roles.filter((role) => roleOrder.includes(role)),
+    }))
+    .filter((employee) => employee.roles.length > 0)
     .sort((a, b) => {
       const aRank = Math.min(...a.roles.map((role) => roleOrder.indexOf(role)).filter((rank) => rank >= 0));
       const bRank = Math.min(...b.roles.map((role) => roleOrder.indexOf(role)).filter((rank) => rank >= 0));

@@ -431,6 +431,7 @@ function normalizeTaskMaterials(rows: unknown[]): ProductionTaskMaterial[] {
 }
 
 const validProductionRoles: ProductionEmployeeRole[] = ["operario", "ingeniero", "supervisor", "logistica", "administrativo"];
+const assignableProductionRoles = new Set<ProductionEmployeeRole>(["operario", "ingeniero"]);
 
 function normalizeProductionEmployees(rows: unknown[]): ProductionEmployeeOption[] {
   return rows
@@ -439,7 +440,7 @@ function normalizeProductionEmployees(rows: unknown[]): ProductionEmployeeOption
       return {
         id: String(value.id ?? ""),
         name: String(value.name ?? "").trim(),
-        roles: normalizeProductionRoles(value.production_roles),
+        roles: normalizeProductionRoles(value.production_roles).filter((role) => assignableProductionRoles.has(role)),
       };
     })
     .filter((employee) => employee.id && employee.name && employee.roles.length);
