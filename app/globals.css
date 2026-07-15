@@ -273,6 +273,20 @@ button { touch-action: manipulation; }
 .section-toolbar p { margin: 3px 0 0; color: #71717a; font-size: 11px; }
 .section-toolbar__actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
 .section-toolbar__actions .btn { min-height: 46px; padding-right: 16px; padding-left: 16px; font-size: 13px; }
+.section-toolbar__stat {
+  display: inline-flex;
+  min-height: 42px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid;
+  border-radius: 11px;
+  padding: 5px 11px;
+}
+.section-toolbar__stat strong { font-size: 19px; line-height: 1; font-weight: 950; }
+.section-toolbar__stat span { font-size: 10px; font-weight: 900; text-transform: uppercase; }
+.section-toolbar__stat--magenta { border-color: rgba(190,30,114,.18); background: #FCE4F0; color: #8E1557; }
+.section-toolbar__stat--amber { border-color: #fde68a; background: #fffbeb; color: #92400e; }
 
 .workspace-panel { min-width: 0; }
 .workspace-table, .workspace-list { min-width: 0; max-height: 62vh; overflow: auto; overscroll-behavior: contain; }

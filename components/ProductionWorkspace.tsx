@@ -29,12 +29,6 @@ type Tab = "tareas" | "inventario" | "consumos";
 type WorkspaceModal = "task" | "consumption" | "item" | "movement" | null;
 type Feedback = { type: "success" | "error" | "info"; text: string } | null;
 
-const tabs: Array<{ id: Tab; label: string; detail: string }> = [
-  { id: "tareas", label: "Tareas", detail: "Soldadura, ensamble, pintura, lavado y revision" },
-  { id: "inventario", label: "Inventario", detail: "Items, stock y entradas manuales" },
-  { id: "consumos", label: "Consumos", detail: "Material usado por tarea y centro de costo" },
-];
-
 const processOptions = [
   "Soldadura",
   "Ensamble",
@@ -74,11 +68,8 @@ export function ProductionWorkspace({ data, email }: { data: ProductionWorkspace
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [isPending, startTransition] = useTransition();
 
-  const metrics = useMemo(() => buildMetrics(data.items, data.tasks, data.movements), [data.items, data.tasks, data.movements]);
   const visibleTasks = data.tasks.filter((task) => task.status !== "cancelada").slice(0, 80);
   const activeTasks = visibleTasks.filter((task) => !["terminada", "revisada"].includes(task.status));
-
-  const currentTab = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
 
   useEffect(() => {
     if (!feedback || feedback.type === "info") return;
@@ -145,31 +136,11 @@ export function ProductionWorkspace({ data, email }: { data: ProductionWorkspace
         <div className="production-workspace">
           <section className="production-console">
         <div className="production-console__main">
-          <header className="production-commandbar">
-            <div className="production-commandbar__title">
-              <span>Planta TECONDOR</span>
-              <h1>{currentTab.label}</h1>
-              <p>{currentTab.detail}</p>
-            </div>
-            <div className="production-metrics">
-              <Metric label="Tareas activas" value={String(metrics.activeTasks)} detail={`${metrics.inProcessTasks} en proceso`} tone="magenta" />
-              <Metric label="Stock critico" value={String(metrics.lowStock)} detail="items bajo minimo" tone="amber" />
-              <Metric label="Valor stock" value={formatCOP(metrics.stockValue)} detail={`${data.items.length} items`} tone="green" />
-              <Metric label="Consumo mes" value={formatCOP(metrics.monthConsumption)} detail="salidas" tone="sky" />
-            </div>
-            <div className="production-commandbar__actions">
-              <button type="button" className="btn-primary production-primary-action" onClick={runPrimaryAction}>
-                <span>+</span>{primaryActionLabel}
-              </button>
-            </div>
-          </header>
-
           <div className="production-console__content">
           {activeTab === "inventario" ? (
             <InventoryTab
               items={data.items}
               pending={isPending}
-              onCreateItem={() => setModal("item")}
               onMovement={() => setModal("movement")}
             />
           ) : null}
@@ -178,7 +149,6 @@ export function ProductionWorkspace({ data, email }: { data: ProductionWorkspace
             <TasksTab
               tasks={visibleTasks}
               pending={isPending}
-              onCreateTask={() => setModal("task")}
               onConsumeTask={openConsumption}
               onStatus={(task, status) => runAction("Actualizando tarea...", () => updateProductionTaskStatus(task.id, status), "Tarea actualizada.")}
             />
@@ -190,8 +160,6 @@ export function ProductionWorkspace({ data, email }: { data: ProductionWorkspace
               items={data.items.filter((item) => item.active)}
               materials={data.task_materials}
               movements={data.movements}
-              pending={isPending}
-              onConsume={() => openConsumption()}
             />
           ) : null}
           </div>
@@ -397,14 +365,13 @@ function EmptyPlantState({ onCreate }: { onCreate: () => void }) {
 function InventoryTab({
   items,
   pending,
-  onCreateItem,
   onMovement,
 }: {
   items: InventoryItem[];
   pending: boolean;
-  onCreateItem: () => void;
   onMovement: () => void;
 }) {
+  const criticalStock = items.filter((item) => item.active && item.min_stock > 0 && item.stock <= item.min_stock).length;
   return (
     <div className="workspace-section">
       <div className="section-toolbar">
@@ -413,8 +380,8 @@ function InventoryTab({
           <p>{items.length} items registrados y disponibles para consumo.</p>
         </div>
         <div className="section-toolbar__actions">
+          <SectionStat value={criticalStock} label="Stock critico" tone="amber" />
           <button type="button" className="btn-secondary" disabled={pending} onClick={onMovement}>Movimiento</button>
-          <button type="button" className="btn-primary" disabled={pending} onClick={onCreateItem}>Nuevo item</button>
         </div>
       </div>
       <Panel title="Existencias" detail="Consulta rápida de stock, costo y ubicación.">
@@ -456,13 +423,11 @@ function InventoryTab({
 function TasksTab({
   tasks,
   pending,
-  onCreateTask,
   onConsumeTask,
   onStatus,
 }: {
   tasks: ProductionTask[];
   pending: boolean;
-  onCreateTask: () => void;
   onConsumeTask: (taskId?: string) => void;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
 }) {
@@ -470,6 +435,7 @@ function TasksTab({
   const filteredTasks = filter === "activas"
     ? tasks.filter((task) => !["terminada", "revisada", "cancelada"].includes(task.status))
     : tasks.filter((task) => task.status === filter);
+  const activeCount = tasks.filter((task) => !["terminada", "revisada", "cancelada"].includes(task.status)).length;
   const filters: Array<["activas" | ProductionTaskStatus, string]> = [
     ["activas", "Activas"],
     ["pendiente", "Pendientes"],
@@ -485,10 +451,7 @@ function TasksTab({
           <h2>Derrotero de tareas</h2>
           <p>{filteredTasks.length} tareas en la vista seleccionada.</p>
         </div>
-        <div className="section-toolbar__actions">
-          <button type="button" className="btn-secondary" onClick={() => onConsumeTask()}>Registrar consumo</button>
-          <button type="button" className="btn-primary" onClick={onCreateTask}>Nueva tarea</button>
-        </div>
+        <SectionStat value={activeCount} label="Tareas activas" tone="magenta" />
       </div>
       <div className="task-filters" aria-label="Filtrar tareas">
         {filters.map(([value, label]) => (
@@ -514,15 +477,11 @@ function ConsumptionTab({
   items,
   materials,
   movements,
-  pending,
-  onConsume,
 }: {
   tasks: ProductionTask[];
   items: InventoryItem[];
   materials: { id: string; task_id: string; consumed_quantity: number; item?: InventoryItem | null }[];
   movements: InventoryMovement[];
-  pending: boolean;
-  onConsume: () => void;
 }) {
   return (
     <div className="workspace-section">
@@ -530,11 +489,6 @@ function ConsumptionTab({
         <div>
           <h2>Consumos de materiales</h2>
           <p>{tasks.length} tareas activas · {items.length} materiales disponibles.</p>
-        </div>
-        <div className="section-toolbar__actions">
-          <button type="button" className="btn-primary" disabled={pending || !tasks.length || !items.length} onClick={onConsume}>
-            Registrar consumo
-          </button>
         </div>
       </div>
       <div className="consumption-grid">
@@ -1213,18 +1167,11 @@ function Panel({ title, detail, children }: { title: string; detail?: string; ch
   );
 }
 
-function Metric({ label, value, detail, tone }: { label: string; value: string; detail: string; tone: "magenta" | "green" | "amber" | "sky" }) {
-  const toneClasses = {
-    magenta: "border-tecondor-magenta/15 bg-tecondor-magentaLight text-tecondor-magentaDark",
-    green: "border-emerald-200 bg-emerald-50 text-emerald-800",
-    amber: "border-amber-200 bg-amber-50 text-amber-800",
-    sky: "border-sky-200 bg-sky-50 text-sky-800",
-  };
+function SectionStat({ value, label, tone }: { value: number; label: string; tone: "magenta" | "amber" }) {
   return (
-    <div className={cn("rounded-2xl border px-3 py-3 shadow-sm", toneClasses[tone])}>
-      <div className="text-[10px] font-black uppercase tracking-wide opacity-75">{label}</div>
-      <div className="mt-1 text-lg font-black leading-none sm:text-xl">{value}</div>
-      <div className="truncate text-[11px] opacity-75">{detail}</div>
+    <div className={cn("section-toolbar__stat", `section-toolbar__stat--${tone}`)}>
+      <strong>{value}</strong>
+      <span>{label}</span>
     </div>
   );
 }
@@ -1490,18 +1437,6 @@ function EmptyState({ title, detail, compact }: { title: string; detail: string;
       <div className="mt-1 text-xs text-neutral-500">{detail}</div>
     </div>
   );
-}
-
-function buildMetrics(items: InventoryItem[], tasks: ProductionTask[], movements: InventoryMovement[]) {
-  const monthKey = todayInputValue().slice(0, 7);
-  const activeTasks = tasks.filter((task) => !["terminada", "revisada", "cancelada"].includes(task.status)).length;
-  const inProcessTasks = tasks.filter((task) => task.status === "en_proceso").length;
-  const lowStock = items.filter((item) => item.active && item.min_stock > 0 && item.stock <= item.min_stock).length;
-  const stockValue = items.reduce((sum, item) => sum + Number(item.stock || 0) * Number(item.average_cost || 0), 0);
-  const monthConsumption = movements
-    .filter((movement) => movement.movement_type === "salida" && String(movement.movement_date || "").startsWith(monthKey))
-    .reduce((sum, movement) => sum + Number(movement.total_cost || 0), 0);
-  return { activeTasks, inProcessTasks, lowStock, stockValue, monthConsumption };
 }
 
 function textValue(formData: FormData, key: string): string {
