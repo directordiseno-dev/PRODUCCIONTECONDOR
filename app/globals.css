@@ -55,6 +55,69 @@ button { touch-action: manipulation; }
 
 .production-app { min-height: 100dvh; }
 
+.combobox-field {
+  position: relative;
+  min-width: 0;
+}
+
+.combobox-control { position: relative; }
+.combobox-input { padding-right: 46px; }
+
+.combobox-toggle {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: #f4f4f5;
+  color: #8E1557;
+  font-size: 17px;
+  font-weight: 900;
+}
+
+.combobox-toggle:hover { background: #FCE4F0; }
+
+.combobox-options {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  left: 0;
+  z-index: 60;
+  max-height: min(240px, 36dvh);
+  overflow-y: auto;
+  border: 1px solid #e4e4e7;
+  border-radius: 11px;
+  background: #fff;
+  padding: 5px;
+  box-shadow: 0 18px 45px rgba(15,23,42,.18);
+}
+
+.combobox-options button {
+  display: grid;
+  width: 100%;
+  min-height: 42px;
+  grid-template-columns: minmax(72px,auto) minmax(0,1fr);
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  padding: 7px 9px;
+  color: #3f3f46;
+  text-align: left;
+}
+
+.combobox-options button:hover,
+.combobox-options button.is-active { background: #FCE4F0; color: #8E1557; }
+.combobox-options strong { font-size: 12px; font-weight: 900; }
+.combobox-options span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.combobox-empty { padding: 12px; color: #71717a; font-size: 12px; text-align: center; }
+.combobox-help { margin-top: 4px; color: #8E1557; font-size: 10px; font-weight: 700; }
+
 .plant-header {
   position: sticky;
   top: 0;

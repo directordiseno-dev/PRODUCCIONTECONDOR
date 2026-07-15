@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useId, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AppHeader } from "@/components/AppHeader";
 import {
@@ -784,7 +784,7 @@ function TaskCreateForm({
       <Field name="title" label="¿Que trabajo se va a realizar?" placeholder="Ej. Soldar base de la maquina" required autoFocus />
       <div className="modal-form__grid modal-form__grid--2">
         <SelectField name="process_type" label="Proceso" options={processOptions.map((process) => [process, process])} />
-        <SelectField name="cost_center_code" label="Centro de costo" options={costCenters.map((costCenter) => [costCenter.code, costCenterLabel(costCenter)])} blank="Sin centro todavia" />
+        <ComboboxField name="cost_center_code" label="Centro de costo" options={costCenters.map((costCenter) => [costCenter.code, costCenterLabel(costCenter)])} placeholder="Escribe codigo, cliente o nombre..." />
       </div>
       <div className="modal-form__grid modal-form__grid--3">
         <SelectField name="assigned_to" label="Responsable" options={employeeOptions} blank={employeeOptions.length ? "Selecciona empleado" : "Sin empleados disponibles"} />
@@ -928,7 +928,7 @@ function InventoryMovementForm({
         <Field name="unit_cost" label="Costo unitario" type="number" step="0.01" min="0" />
       </div>
       <div className="modal-form__grid modal-form__grid--2">
-        <SelectField name="cost_center_code" label="Centro de costo" options={costCenters.map((costCenter) => [costCenter.code, costCenterLabel(costCenter)])} blank="Opcional" />
+        <ComboboxField name="cost_center_code" label="Centro de costo" options={costCenters.map((costCenter) => [costCenter.code, costCenterLabel(costCenter)])} placeholder="Escribe para buscar..." />
         <Field name="movement_date" label="Fecha" type="date" defaultValue={todayInputValue()} />
       </div>
       <Field name="notes" label="Nota" placeholder="Compra, ajuste, salida manual..." />
@@ -1009,6 +1009,139 @@ function TextareaField({ name, label, placeholder }: { name: string; label: stri
       <span className="label">{label}</span>
       <textarea name={name} placeholder={placeholder} rows={2} className="input resize-y" />
     </label>
+  );
+}
+
+function ComboboxField({
+  name,
+  label,
+  options,
+  placeholder,
+  required,
+}: {
+  name: string;
+  label: string;
+  options: Array<[string, string]>;
+  placeholder?: string;
+  required?: boolean;
+}) {
+  const inputId = useId();
+  const listboxId = `${inputId}-options`;
+  const [query, setQuery] = useState("");
+  const [selectedValue, setSelectedValue] = useState("");
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const normalizedQuery = normalizeSearchText(query);
+  const filteredOptions = useMemo(() => {
+    if (!normalizedQuery) return options.slice(0, 10);
+    return options
+      .filter(([value, optionLabel]) => normalizeSearchText(`${value} ${optionLabel}`).includes(normalizedQuery))
+      .slice(0, 10);
+  }, [normalizedQuery, options]);
+
+  function chooseOption(option: [string, string]) {
+    setSelectedValue(option[0]);
+    setQuery(option[1]);
+    setOpen(false);
+    setActiveIndex(-1);
+  }
+
+  function resolveExactValue(value: string) {
+    const normalized = normalizeSearchText(value);
+    return options.find(([optionValue, optionLabel]) =>
+      normalizeSearchText(optionValue) === normalized || normalizeSearchText(optionLabel) === normalized,
+    );
+  }
+
+  return (
+    <div
+      className="combobox-field"
+      onBlur={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        const exact = resolveExactValue(query);
+        if (exact) chooseOption(exact);
+        else setOpen(false);
+      }}
+    >
+      <label htmlFor={inputId} className="label">{label}</label>
+      <div className="combobox-control">
+        <input
+          id={inputId}
+          type="text"
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={open}
+          aria-controls={listboxId}
+          aria-activedescendant={activeIndex >= 0 ? `${listboxId}-${activeIndex}` : undefined}
+          required={required}
+          value={query}
+          placeholder={placeholder}
+          className="input combobox-input"
+          autoComplete="off"
+          onFocus={() => setOpen(true)}
+          onChange={(event) => {
+            const nextQuery = event.target.value;
+            const exact = resolveExactValue(nextQuery);
+            setQuery(nextQuery);
+            setSelectedValue(exact?.[0] ?? "");
+            setActiveIndex(-1);
+            setOpen(true);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              setOpen(true);
+              setActiveIndex((current) => Math.min(filteredOptions.length - 1, current + 1));
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault();
+              setActiveIndex((current) => Math.max(0, current - 1));
+            } else if (event.key === "Enter" && open && activeIndex >= 0 && filteredOptions[activeIndex]) {
+              event.preventDefault();
+              chooseOption(filteredOptions[activeIndex]);
+            } else if (event.key === "Escape") {
+              setOpen(false);
+              setActiveIndex(-1);
+            }
+          }}
+        />
+        <button
+          type="button"
+          className="combobox-toggle"
+          aria-label={open ? "Cerrar opciones" : "Mostrar opciones"}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            setOpen((current) => !current);
+            document.getElementById(inputId)?.focus();
+          }}
+        >
+          ▾
+        </button>
+      </div>
+      <input type="hidden" name={name} value={selectedValue} />
+      {open ? (
+        <div id={listboxId} className="combobox-options" role="listbox">
+          {filteredOptions.length ? filteredOptions.map((option, index) => (
+            <button
+              key={option[0]}
+              id={`${listboxId}-${index}`}
+              type="button"
+              role="option"
+              aria-selected={selectedValue === option[0]}
+              className={cn(activeIndex === index && "is-active")}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => setActiveIndex(index)}
+              onClick={() => chooseOption(option)}
+            >
+              <strong>{option[0]}</strong>
+              <span>{option[1].replace(`${option[0]} - `, "")}</span>
+            </button>
+          )) : (
+            <div className="combobox-empty">No hay centros de costo que coincidan.</div>
+          )}
+        </div>
+      ) : null}
+      {query && !selectedValue ? <div className="combobox-help">Selecciona una coincidencia para guardar el centro de costo.</div> : null}
+    </div>
   );
 }
 
@@ -1145,4 +1278,8 @@ function todayInputValue(): string {
   const now = new Date();
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 10);
+}
+
+function normalizeSearchText(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es").trim();
 }
