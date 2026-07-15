@@ -5,12 +5,11 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { PwaRegistration } from "@/components/PwaRegistration";
 
-type AppSection = "inicio" | "inventario" | "tareas" | "consumos";
+type AppSection = "tareas" | "inventario" | "consumos";
 
 const navigation: Array<{ id: AppSection; label: string }> = [
-  { id: "inicio", label: "Inicio" },
-  { id: "inventario", label: "Inventario" },
   { id: "tareas", label: "Tareas" },
+  { id: "inventario", label: "Inventario" },
   { id: "consumos", label: "Consumos" },
 ];
 

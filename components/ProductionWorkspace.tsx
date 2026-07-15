@@ -25,14 +25,13 @@ import type {
   Supplier,
 } from "@/lib/types";
 
-type Tab = "inicio" | "inventario" | "tareas" | "consumos";
+type Tab = "tareas" | "inventario" | "consumos";
 type WorkspaceModal = "task" | "consumption" | "item" | "movement" | null;
 type Feedback = { type: "success" | "error" | "info"; text: string } | null;
 
 const tabs: Array<{ id: Tab; label: string; detail: string }> = [
-  { id: "inicio", label: "Inicio planta", detail: "Tareas activas, alertas y movimientos recientes" },
-  { id: "inventario", label: "Inventario", detail: "Items, stock y entradas manuales" },
   { id: "tareas", label: "Tareas", detail: "Soldadura, ensamble, pintura, lavado y revision" },
+  { id: "inventario", label: "Inventario", detail: "Items, stock y entradas manuales" },
   { id: "consumos", label: "Consumos", detail: "Material usado por tarea y centro de costo" },
 ];
 
@@ -69,7 +68,7 @@ const statusLabels: Record<ProductionTaskStatus, string> = {
 
 export function ProductionWorkspace({ data, email }: { data: ProductionWorkspaceData; email: string }) {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<Tab>("inicio");
+  const [activeTab, setActiveTab] = useState<Tab>("tareas");
   const [modal, setModal] = useState<WorkspaceModal>(null);
   const [consumptionTaskId, setConsumptionTaskId] = useState("");
   const [feedback, setFeedback] = useState<Feedback>(null);
@@ -78,7 +77,6 @@ export function ProductionWorkspace({ data, email }: { data: ProductionWorkspace
   const metrics = useMemo(() => buildMetrics(data.items, data.tasks, data.movements), [data.items, data.tasks, data.movements]);
   const visibleTasks = data.tasks.filter((task) => task.status !== "cancelada").slice(0, 80);
   const activeTasks = visibleTasks.filter((task) => !["terminada", "revisada"].includes(task.status));
-  const lowStockItems = data.items.filter((item) => item.active && item.min_stock > 0 && item.stock <= item.min_stock);
 
   const currentTab = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
 
@@ -167,19 +165,6 @@ export function ProductionWorkspace({ data, email }: { data: ProductionWorkspace
           </header>
 
           <div className="production-console__content">
-          {activeTab === "inicio" ? (
-            <ProductionHome
-              tasks={activeTasks}
-              lowStockItems={lowStockItems}
-              movements={data.movements}
-              pending={isPending}
-              onOpenTab={setActiveTab}
-              onCreateTask={() => setModal("task")}
-              onConsumeTask={openConsumption}
-              onStatus={(task, status) => runAction("Actualizando tarea...", () => updateProductionTaskStatus(task.id, status), "Tarea actualizada.")}
-            />
-          ) : null}
-
           {activeTab === "inventario" ? (
             <InventoryTab
               items={data.items}

@@ -1,4 +1,5 @@
-const CACHE = "tecondor-produccion-v1";
+const CACHE_PREFIX = "tecondor-produccion-";
+const CACHE = `${CACHE_PREFIX}v2`;
 const OFFLINE_URL = "/offline";
 
 self.addEventListener("install", (event) => {
@@ -8,9 +9,17 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key)))),
+    caches.keys().then(async (keys) => {
+      const isUpgrade = keys.some((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE);
+      await Promise.all(keys.filter((key) => key.startsWith(CACHE_PREFIX) && key !== CACHE).map((key) => caches.delete(key)));
+      await self.clients.claim();
+
+      if (isUpgrade) {
+        const windows = await self.clients.matchAll({ type: "window" });
+        await Promise.all(windows.map((client) => client.navigate(client.url)));
+      }
+    }),
   );
-  self.clients.claim();
 });
 
 self.addEventListener("fetch", (event) => {

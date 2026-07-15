@@ -22,7 +22,7 @@ export async function updateSession(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
   const path = request.nextUrl.pathname;
-  const publicPath = path === "/login" || path === "/offline" || path.startsWith("/_next") || path.startsWith("/icons/") || path === "/sw.js" || path === "/manifest.webmanifest";
+  const publicPath = path === "/login" || path === "/offline" || path === "/api/version" || path.startsWith("/_next") || path.startsWith("/icons/") || path === "/sw.js" || path === "/manifest.webmanifest";
 
   if (!user && !publicPath) {
     const url = request.nextUrl.clone();
