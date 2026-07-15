@@ -763,57 +763,22 @@ function TaskCreateForm({
   onCancel: () => void;
 }) {
   const employeeOptions = useMemo(() => productionEmployeeOptions(employees), [employees]);
-  const formRef = useRef<HTMLFormElement>(null);
-  const [step, setStep] = useState(0);
-  const [review, setReview] = useState<Record<string, string>>({});
   const steps = ["Trabajo", "Asignacion", "Planeacion", "Confirmar"];
+  const wizard = useFormWizard(steps.length);
 
-  useEffect(() => {
-    if (step >= steps.length - 1) return;
-    const frame = window.requestAnimationFrame(() => {
-      formRef.current
-        ?.querySelector<HTMLElement>(`[data-task-step="${step}"] input:not([type="hidden"]), [data-task-step="${step}"] select, [data-task-step="${step}"] textarea`)
-        ?.focus();
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [step, steps.length]);
-
-  function collectDraft(form: HTMLFormElement) {
-    return Object.fromEntries(
-      Array.from(new FormData(form).entries(), ([key, value]) => [key, String(value)]),
-    );
-  }
-
-  function goNext() {
-    const form = formRef.current;
-    const panel = form?.querySelector<HTMLElement>(`[data-task-step="${step}"]`);
-    const controls = panel
-      ? Array.from(panel.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input:not([type='hidden']), select, textarea"))
-      : [];
-    const invalidControl = controls.find((control) => !control.checkValidity());
-
-    if (invalidControl) {
-      invalidControl.reportValidity();
-      invalidControl.focus();
-      return;
-    }
-
-    if (form && step === steps.length - 2) setReview(collectDraft(form));
-    setStep((current) => Math.min(steps.length - 1, current + 1));
-  }
-
-  const selectedCostCenter = costCenters.find((costCenter) => costCenter.code === review.cost_center_code);
-  const selectedEmployee = employeeOptions.find(([value]) => value === review.assigned_to)?.[1];
-  const selectedPriority = priorityLabels[(review.priority || "media") as ProductionTaskPriority];
+  const selectedCostCenter = costCenters.find((costCenter) => costCenter.code === wizard.review.cost_center_code);
+  const selectedEmployee = employeeOptions.find(([value]) => value === wizard.review.assigned_to)?.[1];
+  const selectedPriority = priorityLabels[(wizard.review.priority || "media") as ProductionTaskPriority];
 
   return (
     <form
-      ref={formRef}
+      ref={wizard.formRef}
       className="modal-form task-wizard"
+      onKeyDown={wizard.handleKeyDown}
       onSubmit={(event) => {
         event.preventDefault();
-        if (step < steps.length - 1) {
-          goNext();
+        if (wizard.step < steps.length - 1) {
+          wizard.goNext();
           return;
         }
         const formData = new FormData(event.currentTarget);
@@ -829,29 +794,22 @@ function TaskCreateForm({
         });
       }}
     >
-      <div className="task-wizard__progress" aria-label={`Paso ${step + 1} de ${steps.length}`}>
-        {steps.map((label, index) => (
-          <div key={label} className={cn("task-wizard__progress-item", index === step && "is-active", index < step && "is-complete")}>
-            <span>{index < step ? "✓" : index + 1}</span>
-            <strong>{label}</strong>
-          </div>
-        ))}
-      </div>
+      <WizardProgress steps={steps} currentStep={wizard.step} />
 
-      <section className="task-wizard__step" data-task-step="0" hidden={step !== 0}>
-        <TaskWizardHeading eyebrow="Paso 1 de 4" title="¿Que trabajo se necesita?" detail="Describe la tarea y selecciona el proceso de produccion." />
+      <section className="task-wizard__step" data-wizard-step="0" hidden={wizard.step !== 0}>
+        <WizardHeading eyebrow="Paso 1 de 4" title="¿Que trabajo se necesita?" detail="Describe la tarea y selecciona el proceso de produccion." />
         <Field name="title" label="Trabajo a realizar" placeholder="Ej. Soldar base de la maquina" required autoFocus />
         <SelectField name="process_type" label="Proceso" options={processOptions.map((process) => [process, process])} />
       </section>
 
-      <section className="task-wizard__step" data-task-step="1" hidden={step !== 1}>
-        <TaskWizardHeading eyebrow="Paso 2 de 4" title="¿Para quien y quien la hace?" detail="Busca el centro de costo y asigna un operario o ingeniero." />
+      <section className="task-wizard__step" data-wizard-step="1" hidden={wizard.step !== 1}>
+        <WizardHeading eyebrow="Paso 2 de 4" title="¿Para quien y quien la hace?" detail="Busca el centro de costo y asigna un operario o ingeniero." />
         <ComboboxField name="cost_center_code" label="Centro de costo" options={costCenters.map((costCenter) => [costCenter.code, costCenterLabel(costCenter)])} placeholder="Escribe codigo, cliente o nombre..." />
         <SelectField name="assigned_to" label="Responsable" options={employeeOptions} blank={employeeOptions.length ? "Selecciona empleado" : "Sin empleados disponibles"} />
       </section>
 
-      <section className="task-wizard__step" data-task-step="2" hidden={step !== 2}>
-        <TaskWizardHeading eyebrow="Paso 3 de 4" title="¿Como se debe planear?" detail="Define prioridad, cantidad, tiempo e indicaciones para ejecutar bien el trabajo." />
+      <section className="task-wizard__step" data-wizard-step="2" hidden={wizard.step !== 2}>
+        <WizardHeading eyebrow="Paso 3 de 4" title="¿Como se debe planear?" detail="Define prioridad, cantidad, tiempo e indicaciones para ejecutar bien el trabajo." />
         <div className="modal-form__grid modal-form__grid--3">
           <SelectField name="priority" label="Prioridad" options={Object.entries(priorityLabels)} defaultValue="media" />
           <Field name="planned_quantity" label="Cantidad" type="number" step="0.001" min="0.001" defaultValue="1" required />
@@ -860,40 +818,30 @@ function TaskCreateForm({
         <TextareaField name="notes" label="Indicaciones" placeholder="Material, medida, acabado o cuidado especial..." />
       </section>
 
-      <section className="task-wizard__step" data-task-step="3" hidden={step !== 3}>
-        <TaskWizardHeading eyebrow="Paso 4 de 4" title="Revisa antes de crear" detail="Si algo no esta bien, puedes regresar y corregirlo." />
+      <section className="task-wizard__step" data-wizard-step="3" hidden={wizard.step !== 3}>
+        <WizardHeading eyebrow="Paso 4 de 4" title="Revisa antes de crear" detail="Si algo no esta bien, puedes regresar y corregirlo." />
         <div className="task-wizard__review">
           <div className="task-wizard__review-main">
             <span>Trabajo</span>
-            <strong>{review.title || "Sin titulo"}</strong>
-            <small>{review.process_type || "Sin proceso"}</small>
+            <strong>{wizard.review.title || "Sin titulo"}</strong>
+            <small>{wizard.review.process_type || "Sin proceso"}</small>
           </div>
-          <TaskReviewItem label="Centro de costo" value={selectedCostCenter ? costCenterLabel(selectedCostCenter) : "Sin centro de costo"} />
-          <TaskReviewItem label="Responsable" value={selectedEmployee || "Sin responsable"} />
-          <TaskReviewItem label="Prioridad" value={selectedPriority || "Media"} />
-          <TaskReviewItem label="Cantidad" value={review.planned_quantity || "1"} />
-          <TaskReviewItem label="Tiempo estimado" value={review.estimated_minutes ? `${review.estimated_minutes} min` : "Sin estimar"} />
-          {review.notes ? <div className="task-wizard__review-notes"><span>Indicaciones</span><p>{review.notes}</p></div> : null}
+          <ReviewItem label="Centro de costo" value={selectedCostCenter ? costCenterLabel(selectedCostCenter) : "Sin centro de costo"} />
+          <ReviewItem label="Responsable" value={selectedEmployee || "Sin responsable"} />
+          <ReviewItem label="Prioridad" value={selectedPriority || "Media"} />
+          <ReviewItem label="Cantidad" value={wizard.review.planned_quantity || "1"} />
+          <ReviewItem label="Tiempo estimado" value={wizard.review.estimated_minutes ? `${wizard.review.estimated_minutes} min` : "Sin estimar"} />
+          {wizard.review.notes ? <div className="task-wizard__review-notes"><span>Indicaciones</span><p>{wizard.review.notes}</p></div> : null}
         </div>
         <div className="modal-hint">Al confirmar, la tarea quedara lista en el tablero de produccion.</div>
       </section>
 
-      <div className="modal-actions task-wizard__actions">
-        <button type="button" className="btn-secondary" disabled={pending} onClick={onCancel}>Cancelar</button>
-        <div className="task-wizard__action-group">
-          {step > 0 ? <button type="button" className="btn-secondary" disabled={pending} onClick={() => setStep((current) => Math.max(0, current - 1))}>Atras</button> : null}
-          {step < steps.length - 1 ? (
-            <button type="button" className="btn-primary" onClick={goNext}>Siguiente <span aria-hidden="true">→</span></button>
-          ) : (
-            <button type="submit" className="btn-primary" disabled={pending}>{pending ? "Creando..." : "Crear tarea"}</button>
-          )}
-        </div>
-      </div>
+      <WizardActions wizard={wizard} stepCount={steps.length} pending={pending} pendingLabel="Creando..." submitLabel="Crear tarea" onCancel={onCancel} />
     </form>
   );
 }
 
-function TaskWizardHeading({ eyebrow, title, detail }: { eyebrow: string; title: string; detail: string }) {
+function WizardHeading({ eyebrow, title, detail }: { eyebrow: string; title: string; detail: string }) {
   return (
     <div className="task-wizard__heading">
       <span>{eyebrow}</span>
@@ -903,11 +851,108 @@ function TaskWizardHeading({ eyebrow, title, detail }: { eyebrow: string; title:
   );
 }
 
-function TaskReviewItem({ label, value }: { label: string; value: string }) {
+function ReviewItem({ label, value }: { label: string; value: string }) {
   return (
     <div className="task-wizard__review-item">
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+function useFormWizard(stepCount: number) {
+  const formRef = useRef<HTMLFormElement>(null);
+  const [step, setStep] = useState(0);
+  const [review, setReview] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (step >= stepCount - 1) return;
+    const frame = window.requestAnimationFrame(() => {
+      formRef.current
+        ?.querySelector<HTMLElement>(`[data-wizard-step="${step}"] input:not([type="hidden"]), [data-wizard-step="${step}"] select, [data-wizard-step="${step}"] textarea`)
+        ?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [step, stepCount]);
+
+  function goNext() {
+    const form = formRef.current;
+    const panel = form?.querySelector<HTMLElement>(`[data-wizard-step="${step}"]`);
+    const controls = panel
+      ? Array.from(panel.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input:not([type='hidden']), select, textarea"))
+      : [];
+    const invalidControl = controls.find((control) => !control.checkValidity());
+
+    if (invalidControl) {
+      invalidControl.reportValidity();
+      invalidControl.focus();
+      return;
+    }
+
+    if (form && step === stepCount - 2) {
+      setReview(Object.fromEntries(
+        Array.from(new FormData(form).entries(), ([key, value]) => [key, String(value)]),
+      ));
+    }
+    setStep((current) => Math.min(stepCount - 1, current + 1));
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLFormElement>) {
+    const target = event.target as HTMLElement;
+    if (event.key !== "Enter" || step >= stepCount - 1 || target.tagName === "TEXTAREA" || target.getAttribute("role") === "combobox") return;
+    event.preventDefault();
+    goNext();
+  }
+
+  return {
+    formRef,
+    step,
+    review,
+    goNext,
+    handleKeyDown,
+    goBack: () => setStep((current) => Math.max(0, current - 1)),
+  };
+}
+
+function WizardProgress({ steps, currentStep }: { steps: string[]; currentStep: number }) {
+  return (
+    <div className="task-wizard__progress" aria-label={`Paso ${currentStep + 1} de ${steps.length}`}>
+      {steps.map((label, index) => (
+        <div key={label} className={cn("task-wizard__progress-item", index === currentStep && "is-active", index < currentStep && "is-complete")}>
+          <span>{index < currentStep ? "✓" : index + 1}</span>
+          <strong>{label}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function WizardActions({
+  wizard,
+  stepCount,
+  pending,
+  pendingLabel,
+  submitLabel,
+  onCancel,
+}: {
+  wizard: ReturnType<typeof useFormWizard>;
+  stepCount: number;
+  pending: boolean;
+  pendingLabel: string;
+  submitLabel: string;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="modal-actions task-wizard__actions">
+      <button type="button" className="btn-secondary" disabled={pending} onClick={onCancel}>Cancelar</button>
+      <div className="task-wizard__action-group">
+        {wizard.step > 0 ? <button type="button" className="btn-secondary" disabled={pending} onClick={wizard.goBack}>Atras</button> : null}
+        {wizard.step < stepCount - 1 ? (
+          <button type="button" className="btn-primary" onClick={wizard.goNext}>Siguiente <span aria-hidden="true">→</span></button>
+        ) : (
+          <button type="submit" className="btn-primary" disabled={pending}>{pending ? pendingLabel : submitLabel}</button>
+        )}
+      </div>
     </div>
   );
 }
@@ -927,11 +972,22 @@ function ConsumptionForm({
   onSubmit: (input: Parameters<typeof consumeProductionMaterial>[0]) => void;
   onCancel: () => void;
 }) {
+  const steps = ["Tarea", "Material", "Cantidad", "Confirmar"];
+  const wizard = useFormWizard(steps.length);
+  const selectedTask = tasks.find((task) => task.id === wizard.review.task_id);
+  const selectedItem = items.find((item) => item.id === wizard.review.item_id);
+
   return (
     <form
-      className="modal-form"
+      ref={wizard.formRef}
+      className="modal-form task-wizard"
+      onKeyDown={wizard.handleKeyDown}
       onSubmit={(event) => {
         event.preventDefault();
+        if (wizard.step < steps.length - 1) {
+          wizard.goNext();
+          return;
+        }
         const formData = new FormData(event.currentTarget);
         onSubmit({
           task_id: textValue(formData, "task_id"),
@@ -941,14 +997,41 @@ function ConsumptionForm({
         });
       }}
     >
-      <SelectField name="task_id" label="Tarea que consume" options={tasks.map((task) => [task.id, taskLabel(task)])} blank="Selecciona la tarea..." defaultValue={defaultTaskId} required autoFocus />
-      <SelectField name="item_id" label="Material utilizado" options={items.map((item) => [item.id, `${item.code} - ${item.name} · disponible ${formatQuantity(item.stock)} ${item.unit}`])} blank="Selecciona el material..." required />
-      <div className="modal-form__grid modal-form__grid--2">
+      <WizardProgress steps={steps} currentStep={wizard.step} />
+
+      <section className="task-wizard__step" data-wizard-step="0" hidden={wizard.step !== 0}>
+        <WizardHeading eyebrow="Paso 1 de 4" title="¿Que tarea uso el material?" detail="Selecciona el trabajo al que se cargara este consumo." />
+        <SelectField name="task_id" label="Tarea de produccion" options={tasks.map((task) => [task.id, taskLabel(task)])} blank="Selecciona la tarea..." defaultValue={defaultTaskId} required autoFocus />
+      </section>
+
+      <section className="task-wizard__step" data-wizard-step="1" hidden={wizard.step !== 1}>
+        <WizardHeading eyebrow="Paso 2 de 4" title="¿Que material se utilizo?" detail="Elige el item correcto y revisa la cantidad disponible." />
+        <SelectField name="item_id" label="Material utilizado" options={items.map((item) => [item.id, `${item.code} - ${item.name} · disponible ${formatQuantity(item.stock)} ${item.unit}`])} blank="Selecciona el material..." required />
+      </section>
+
+      <section className="task-wizard__step" data-wizard-step="2" hidden={wizard.step !== 2}>
+        <WizardHeading eyebrow="Paso 3 de 4" title="¿Cuanto se consumio?" detail="Indica la cantidad exacta y agrega una nota solamente si hace falta." />
         <Field name="quantity" label="Cantidad utilizada" type="number" step="0.001" min="0.001" required placeholder="0" />
         <Field name="notes" label="Nota opcional" placeholder="Corte, desperdicio, pieza usada..." />
-      </div>
-      <div className="modal-hint">El inventario se descuenta inmediatamente y el costo queda asociado al centro de la tarea.</div>
-      <ModalActions pending={pending} submitLabel="Confirmar consumo" onCancel={onCancel} />
+        <div className="modal-hint">El inventario se descontara al confirmar y el costo quedara asociado a la tarea.</div>
+      </section>
+
+      <section className="task-wizard__step" data-wizard-step="3" hidden={wizard.step !== 3}>
+        <WizardHeading eyebrow="Paso 4 de 4" title="Confirma el consumo" detail="Revisa el material y la cantidad antes de descontarlos del inventario." />
+        <div className="task-wizard__review">
+          <div className="task-wizard__review-main">
+            <span>Material</span>
+            <strong>{selectedItem ? `${selectedItem.code} - ${selectedItem.name}` : "Sin material"}</strong>
+            <small>{selectedItem ? `Disponible: ${formatQuantity(selectedItem.stock)} ${selectedItem.unit}` : ""}</small>
+          </div>
+          <ReviewItem label="Tarea" value={selectedTask ? taskLabel(selectedTask) : "Sin tarea"} />
+          <ReviewItem label="Cantidad" value={`${wizard.review.quantity || "0"} ${selectedItem?.unit || ""}`.trim()} />
+          <ReviewItem label="Resultado" value="Descontar inventario" />
+          {wizard.review.notes ? <div className="task-wizard__review-notes"><span>Nota</span><p>{wizard.review.notes}</p></div> : null}
+        </div>
+      </section>
+
+      <WizardActions wizard={wizard} stepCount={steps.length} pending={pending} pendingLabel="Registrando..." submitLabel="Confirmar consumo" onCancel={onCancel} />
     </form>
   );
 }
@@ -964,11 +1047,21 @@ function InventoryItemForm({
   onSubmit: (input: Parameters<typeof createInventoryItem>[0]) => void;
   onCancel: () => void;
 }) {
+  const steps = ["Material", "Organizacion", "Inventario", "Confirmar"];
+  const wizard = useFormWizard(steps.length);
+  const selectedSupplier = suppliers.find((supplier) => supplier.id === wizard.review.preferred_supplier_id);
+
   return (
     <form
-      className="modal-form"
+      ref={wizard.formRef}
+      className="modal-form task-wizard"
+      onKeyDown={wizard.handleKeyDown}
       onSubmit={(event) => {
         event.preventDefault();
+        if (wizard.step < steps.length - 1) {
+          wizard.goNext();
+          return;
+        }
         const formData = new FormData(event.currentTarget);
         onSubmit({
           code: textValue(formData, "code"),
@@ -983,22 +1076,52 @@ function InventoryItemForm({
         });
       }}
     >
-      <div className="modal-form__grid modal-form__grid--2">
+      <WizardProgress steps={steps} currentStep={wizard.step} />
+
+      <section className="task-wizard__step" data-wizard-step="0" hidden={wizard.step !== 0}>
+        <WizardHeading eyebrow="Paso 1 de 4" title="¿Que material vas a crear?" detail="Escribe un nombre claro y un codigo facil de reconocer." />
         <Field name="name" label="Nombre del material" placeholder="Tubo SCH40, lamina, pintura..." required autoFocus />
         <Field name="code" label="Codigo" placeholder="INV-0001" />
-      </div>
+      </section>
+
+      <section className="task-wizard__step" data-wizard-step="1" hidden={wizard.step !== 1}>
+        <WizardHeading eyebrow="Paso 2 de 4" title="¿Como se organiza?" detail="Indica su categoria, unidad de medida y ubicacion en planta." />
       <div className="modal-form__grid modal-form__grid--3">
         <Field name="category" label="Categoria" placeholder="Perfil, rodamiento..." />
         <Field name="unit" label="Unidad" placeholder="und, m, kg" defaultValue="und" />
         <Field name="location" label="Ubicacion" placeholder="Bodega, estante..." />
       </div>
-      <div className="modal-form__grid modal-form__grid--3">
-        <Field name="stock" label="Stock inicial" type="number" step="0.001" min="0" />
-        <Field name="average_cost" label="Costo promedio" type="number" step="0.01" min="0" />
-        <Field name="min_stock" label="Stock minimo" type="number" step="0.001" min="0" />
-      </div>
-      <SelectField name="preferred_supplier_id" label="Proveedor preferido" options={suppliers.map((supplier) => [supplier.id, supplierLabel(supplier)])} blank="Sin proveedor fijo" />
-      <ModalActions pending={pending} submitLabel="Guardar item" onCancel={onCancel} />
+      </section>
+
+      <section className="task-wizard__step" data-wizard-step="2" hidden={wizard.step !== 2}>
+        <WizardHeading eyebrow="Paso 3 de 4" title="¿Con cuanto inventario inicia?" detail="Registra existencias, costo, nivel minimo y proveedor si ya los conoces." />
+        <div className="modal-form__grid modal-form__grid--3">
+          <Field name="stock" label="Stock inicial" type="number" step="0.001" min="0" defaultValue="0" />
+          <Field name="average_cost" label="Costo promedio" type="number" step="0.01" min="0" defaultValue="0" />
+          <Field name="min_stock" label="Stock minimo" type="number" step="0.001" min="0" defaultValue="0" />
+        </div>
+        <SelectField name="preferred_supplier_id" label="Proveedor preferido" options={suppliers.map((supplier) => [supplier.id, supplierLabel(supplier)])} blank="Sin proveedor fijo" />
+      </section>
+
+      <section className="task-wizard__step" data-wizard-step="3" hidden={wizard.step !== 3}>
+        <WizardHeading eyebrow="Paso 4 de 4" title="Revisa el nuevo item" detail="Confirma que el material quede identificado y ubicado correctamente." />
+        <div className="task-wizard__review">
+          <div className="task-wizard__review-main">
+            <span>Material</span>
+            <strong>{wizard.review.name || "Sin nombre"}</strong>
+            <small>{wizard.review.code || "Codigo automatico"}</small>
+          </div>
+          <ReviewItem label="Categoria" value={wizard.review.category || "Sin categoria"} />
+          <ReviewItem label="Unidad" value={wizard.review.unit || "und"} />
+          <ReviewItem label="Ubicacion" value={wizard.review.location || "Sin ubicacion"} />
+          <ReviewItem label="Stock inicial" value={wizard.review.stock || "0"} />
+          <ReviewItem label="Costo promedio" value={formatCOP(Number(wizard.review.average_cost || 0))} />
+          <ReviewItem label="Stock minimo" value={wizard.review.min_stock || "0"} />
+          <ReviewItem label="Proveedor" value={selectedSupplier ? supplierLabel(selectedSupplier) : "Sin proveedor fijo"} />
+        </div>
+      </section>
+
+      <WizardActions wizard={wizard} stepCount={steps.length} pending={pending} pendingLabel="Guardando..." submitLabel="Guardar item" onCancel={onCancel} />
     </form>
   );
 }
@@ -1016,11 +1139,24 @@ function InventoryMovementForm({
   onSubmit: (input: Parameters<typeof createInventoryMovement>[0]) => void;
   onCancel: () => void;
 }) {
+  const steps = ["Movimiento", "Cantidad", "Detalle", "Confirmar"];
+  const wizard = useFormWizard(steps.length);
+  const selectedItem = items.find((item) => item.id === wizard.review.item_id);
+  const selectedCostCenter = costCenters.find((costCenter) => costCenter.code === wizard.review.cost_center_code);
+  const movementLabels: Record<InventoryMovementType, string> = { entrada: "Entrada", salida: "Salida", ajuste: "Ajuste" };
+  const selectedMovement = movementLabels[(wizard.review.movement_type || "entrada") as InventoryMovementType];
+
   return (
     <form
-      className="modal-form"
+      ref={wizard.formRef}
+      className="modal-form task-wizard"
+      onKeyDown={wizard.handleKeyDown}
       onSubmit={(event) => {
         event.preventDefault();
+        if (wizard.step < steps.length - 1) {
+          wizard.goNext();
+          return;
+        }
         const formData = new FormData(event.currentTarget);
         onSubmit({
           item_id: textValue(formData, "item_id"),
@@ -1033,28 +1169,50 @@ function InventoryMovementForm({
         });
       }}
     >
-      <SelectField name="item_id" label="Item de inventario" options={items.map((item) => [item.id, `${item.code} - ${item.name}`])} blank="Selecciona item..." required autoFocus />
-      <div className="modal-form__grid modal-form__grid--3">
+      <WizardProgress steps={steps} currentStep={wizard.step} />
+
+      <section className="task-wizard__step" data-wizard-step="0" hidden={wizard.step !== 0}>
+        <WizardHeading eyebrow="Paso 1 de 4" title="¿Que movimiento vas a registrar?" detail="Selecciona el material y si entra, sale o se ajusta su inventario." />
+        <SelectField name="item_id" label="Item de inventario" options={items.map((item) => [item.id, `${item.code} - ${item.name}`])} blank="Selecciona item..." required autoFocus />
         <SelectField name="movement_type" label="Tipo" options={[["entrada", "Entrada"], ["salida", "Salida"], ["ajuste", "Ajuste"]]} />
+      </section>
+
+      <section className="task-wizard__step" data-wizard-step="1" hidden={wizard.step !== 1}>
+        <WizardHeading eyebrow="Paso 2 de 4" title="¿Que cantidad y costo tiene?" detail="Indica cuanto material se mueve y su costo unitario cuando corresponda." />
+        <div className="modal-form__grid modal-form__grid--2">
         <Field name="quantity" label="Cantidad" type="number" step="0.001" min="0.001" required />
         <Field name="unit_cost" label="Costo unitario" type="number" step="0.01" min="0" />
-      </div>
-      <div className="modal-form__grid modal-form__grid--2">
+        </div>
+      </section>
+
+      <section className="task-wizard__step" data-wizard-step="2" hidden={wizard.step !== 2}>
+        <WizardHeading eyebrow="Paso 3 de 4" title="¿A donde se carga?" detail="Busca el centro de costo, confirma la fecha y agrega una nota si hace falta." />
+        <div className="modal-form__grid modal-form__grid--2">
         <ComboboxField name="cost_center_code" label="Centro de costo" options={costCenters.map((costCenter) => [costCenter.code, costCenterLabel(costCenter)])} placeholder="Escribe para buscar..." />
         <Field name="movement_date" label="Fecha" type="date" defaultValue={todayInputValue()} />
-      </div>
-      <Field name="notes" label="Nota" placeholder="Compra, ajuste, salida manual..." />
-      <ModalActions pending={pending} submitLabel="Registrar movimiento" onCancel={onCancel} />
-    </form>
-  );
-}
+        </div>
+        <Field name="notes" label="Nota" placeholder="Compra, ajuste, salida manual..." />
+      </section>
 
-function ModalActions({ pending, submitLabel, onCancel }: { pending: boolean; submitLabel: string; onCancel: () => void }) {
-  return (
-    <div className="modal-actions">
-      <button type="button" className="btn-secondary" disabled={pending} onClick={onCancel}>Cancelar</button>
-      <button type="submit" className="btn-primary" disabled={pending}>{pending ? "Guardando..." : submitLabel}</button>
-    </div>
+      <section className="task-wizard__step" data-wizard-step="3" hidden={wizard.step !== 3}>
+        <WizardHeading eyebrow="Paso 4 de 4" title="Confirma el movimiento" detail="Revisa la operacion antes de cambiar las existencias del inventario." />
+        <div className="task-wizard__review">
+          <div className="task-wizard__review-main">
+            <span>Item</span>
+            <strong>{selectedItem ? `${selectedItem.code} - ${selectedItem.name}` : "Sin item"}</strong>
+            <small>{selectedMovement}</small>
+          </div>
+          <ReviewItem label="Cantidad" value={`${wizard.review.quantity || "0"} ${selectedItem?.unit || ""}`.trim()} />
+          <ReviewItem label="Costo unitario" value={wizard.review.unit_cost ? formatCOP(Number(wizard.review.unit_cost)) : "Sin costo"} />
+          <ReviewItem label="Fecha" value={wizard.review.movement_date || todayInputValue()} />
+          <ReviewItem label="Centro de costo" value={selectedCostCenter ? costCenterLabel(selectedCostCenter) : "Sin centro de costo"} />
+          {wizard.review.notes ? <div className="task-wizard__review-notes"><span>Nota</span><p>{wizard.review.notes}</p></div> : null}
+        </div>
+        <div className="modal-hint">Al confirmar se actualizara inmediatamente el inventario del item.</div>
+      </section>
+
+      <WizardActions wizard={wizard} stepCount={steps.length} pending={pending} pendingLabel="Registrando..." submitLabel="Registrar movimiento" onCancel={onCancel} />
+    </form>
   );
 }
 
