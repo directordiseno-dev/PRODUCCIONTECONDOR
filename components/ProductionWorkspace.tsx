@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useState, useTransition } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AppHeader } from "@/components/AppHeader";
 import {
@@ -763,11 +763,59 @@ function TaskCreateForm({
   onCancel: () => void;
 }) {
   const employeeOptions = useMemo(() => productionEmployeeOptions(employees), [employees]);
+  const formRef = useRef<HTMLFormElement>(null);
+  const [step, setStep] = useState(0);
+  const [review, setReview] = useState<Record<string, string>>({});
+  const steps = ["Trabajo", "Asignacion", "Planeacion", "Confirmar"];
+
+  useEffect(() => {
+    if (step >= steps.length - 1) return;
+    const frame = window.requestAnimationFrame(() => {
+      formRef.current
+        ?.querySelector<HTMLElement>(`[data-task-step="${step}"] input:not([type="hidden"]), [data-task-step="${step}"] select, [data-task-step="${step}"] textarea`)
+        ?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [step, steps.length]);
+
+  function collectDraft(form: HTMLFormElement) {
+    return Object.fromEntries(
+      Array.from(new FormData(form).entries(), ([key, value]) => [key, String(value)]),
+    );
+  }
+
+  function goNext() {
+    const form = formRef.current;
+    const panel = form?.querySelector<HTMLElement>(`[data-task-step="${step}"]`);
+    const controls = panel
+      ? Array.from(panel.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input:not([type='hidden']), select, textarea"))
+      : [];
+    const invalidControl = controls.find((control) => !control.checkValidity());
+
+    if (invalidControl) {
+      invalidControl.reportValidity();
+      invalidControl.focus();
+      return;
+    }
+
+    if (form && step === steps.length - 2) setReview(collectDraft(form));
+    setStep((current) => Math.min(steps.length - 1, current + 1));
+  }
+
+  const selectedCostCenter = costCenters.find((costCenter) => costCenter.code === review.cost_center_code);
+  const selectedEmployee = employeeOptions.find(([value]) => value === review.assigned_to)?.[1];
+  const selectedPriority = priorityLabels[(review.priority || "media") as ProductionTaskPriority];
+
   return (
     <form
-      className="modal-form"
+      ref={formRef}
+      className="modal-form task-wizard"
       onSubmit={(event) => {
         event.preventDefault();
+        if (step < steps.length - 1) {
+          goNext();
+          return;
+        }
         const formData = new FormData(event.currentTarget);
         onSubmit({
           title: textValue(formData, "title"),
@@ -781,22 +829,86 @@ function TaskCreateForm({
         });
       }}
     >
-      <Field name="title" label="¿Que trabajo se va a realizar?" placeholder="Ej. Soldar base de la maquina" required autoFocus />
-      <div className="modal-form__grid modal-form__grid--2">
+      <div className="task-wizard__progress" aria-label={`Paso ${step + 1} de ${steps.length}`}>
+        {steps.map((label, index) => (
+          <div key={label} className={cn("task-wizard__progress-item", index === step && "is-active", index < step && "is-complete")}>
+            <span>{index < step ? "✓" : index + 1}</span>
+            <strong>{label}</strong>
+          </div>
+        ))}
+      </div>
+
+      <section className="task-wizard__step" data-task-step="0" hidden={step !== 0}>
+        <TaskWizardHeading eyebrow="Paso 1 de 4" title="¿Que trabajo se necesita?" detail="Describe la tarea y selecciona el proceso de produccion." />
+        <Field name="title" label="Trabajo a realizar" placeholder="Ej. Soldar base de la maquina" required autoFocus />
         <SelectField name="process_type" label="Proceso" options={processOptions.map((process) => [process, process])} />
+      </section>
+
+      <section className="task-wizard__step" data-task-step="1" hidden={step !== 1}>
+        <TaskWizardHeading eyebrow="Paso 2 de 4" title="¿Para quien y quien la hace?" detail="Busca el centro de costo y asigna un operario o ingeniero." />
         <ComboboxField name="cost_center_code" label="Centro de costo" options={costCenters.map((costCenter) => [costCenter.code, costCenterLabel(costCenter)])} placeholder="Escribe codigo, cliente o nombre..." />
-      </div>
-      <div className="modal-form__grid modal-form__grid--3">
         <SelectField name="assigned_to" label="Responsable" options={employeeOptions} blank={employeeOptions.length ? "Selecciona empleado" : "Sin empleados disponibles"} />
-        <SelectField name="priority" label="Prioridad" options={Object.entries(priorityLabels)} defaultValue="media" />
-        <Field name="planned_quantity" label="Cantidad" type="number" step="0.001" min="0.001" defaultValue="1" />
-      </div>
-      <div className="modal-form__grid modal-form__grid--2">
-        <Field name="estimated_minutes" label="Tiempo estimado (min)" type="number" min="0" placeholder="Ej. 90" />
+      </section>
+
+      <section className="task-wizard__step" data-task-step="2" hidden={step !== 2}>
+        <TaskWizardHeading eyebrow="Paso 3 de 4" title="¿Como se debe planear?" detail="Define prioridad, cantidad, tiempo e indicaciones para ejecutar bien el trabajo." />
+        <div className="modal-form__grid modal-form__grid--3">
+          <SelectField name="priority" label="Prioridad" options={Object.entries(priorityLabels)} defaultValue="media" />
+          <Field name="planned_quantity" label="Cantidad" type="number" step="0.001" min="0.001" defaultValue="1" required />
+          <Field name="estimated_minutes" label="Tiempo estimado (min)" type="number" min="0" placeholder="Ej. 90" />
+        </div>
         <TextareaField name="notes" label="Indicaciones" placeholder="Material, medida, acabado o cuidado especial..." />
+      </section>
+
+      <section className="task-wizard__step" data-task-step="3" hidden={step !== 3}>
+        <TaskWizardHeading eyebrow="Paso 4 de 4" title="Revisa antes de crear" detail="Si algo no esta bien, puedes regresar y corregirlo." />
+        <div className="task-wizard__review">
+          <div className="task-wizard__review-main">
+            <span>Trabajo</span>
+            <strong>{review.title || "Sin titulo"}</strong>
+            <small>{review.process_type || "Sin proceso"}</small>
+          </div>
+          <TaskReviewItem label="Centro de costo" value={selectedCostCenter ? costCenterLabel(selectedCostCenter) : "Sin centro de costo"} />
+          <TaskReviewItem label="Responsable" value={selectedEmployee || "Sin responsable"} />
+          <TaskReviewItem label="Prioridad" value={selectedPriority || "Media"} />
+          <TaskReviewItem label="Cantidad" value={review.planned_quantity || "1"} />
+          <TaskReviewItem label="Tiempo estimado" value={review.estimated_minutes ? `${review.estimated_minutes} min` : "Sin estimar"} />
+          {review.notes ? <div className="task-wizard__review-notes"><span>Indicaciones</span><p>{review.notes}</p></div> : null}
+        </div>
+        <div className="modal-hint">Al confirmar, la tarea quedara lista en el tablero de produccion.</div>
+      </section>
+
+      <div className="modal-actions task-wizard__actions">
+        <button type="button" className="btn-secondary" disabled={pending} onClick={onCancel}>Cancelar</button>
+        <div className="task-wizard__action-group">
+          {step > 0 ? <button type="button" className="btn-secondary" disabled={pending} onClick={() => setStep((current) => Math.max(0, current - 1))}>Atras</button> : null}
+          {step < steps.length - 1 ? (
+            <button type="button" className="btn-primary" onClick={goNext}>Siguiente <span aria-hidden="true">→</span></button>
+          ) : (
+            <button type="submit" className="btn-primary" disabled={pending}>{pending ? "Creando..." : "Crear tarea"}</button>
+          )}
+        </div>
       </div>
-      <ModalActions pending={pending} submitLabel="Crear tarea" onCancel={onCancel} />
     </form>
+  );
+}
+
+function TaskWizardHeading({ eyebrow, title, detail }: { eyebrow: string; title: string; detail: string }) {
+  return (
+    <div className="task-wizard__heading">
+      <span>{eyebrow}</span>
+      <h3>{title}</h3>
+      <p>{detail}</p>
+    </div>
+  );
+}
+
+function TaskReviewItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="task-wizard__review-item">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 

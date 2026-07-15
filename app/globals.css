@@ -318,6 +318,72 @@ button { touch-action: manipulation; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid #edf0f3; padding-top: 13px; }
 .modal-actions .btn { min-width: 128px; }
 
+.task-wizard__progress {
+  display: grid;
+  grid-template-columns: repeat(4,minmax(0,1fr));
+  gap: 6px;
+}
+.task-wizard__progress-item {
+  display: flex;
+  min-width: 0;
+  min-height: 42px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #e4e4e7;
+  border-radius: 11px;
+  background: #fafafa;
+  padding: 6px 8px;
+  color: #71717a;
+}
+.task-wizard__progress-item span {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 8px;
+  background: #e4e4e7;
+  font-size: 10px;
+  font-weight: 950;
+}
+.task-wizard__progress-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 900; }
+.task-wizard__progress-item.is-active { border-color: rgba(190,30,114,.22); background: #FCE4F0; color: #8E1557; }
+.task-wizard__progress-item.is-active span { background: #BE1E72; color: #fff; }
+.task-wizard__progress-item.is-complete { border-color: #a7f3d0; background: #ecfdf5; color: #047857; }
+.task-wizard__progress-item.is-complete span { background: #10b981; color: #fff; }
+
+.task-wizard__step {
+  display: grid;
+  min-height: 270px;
+  align-content: start;
+  gap: 14px;
+  border: 1px solid #edf0f3;
+  border-radius: 15px;
+  background: linear-gradient(135deg,#fff,#fcfcfd);
+  padding: 18px;
+}
+.task-wizard__step[hidden] { display: none; }
+.task-wizard__heading { padding-bottom: 3px; }
+.task-wizard__heading span { color: #BE1E72; font-size: 9px; font-weight: 950; letter-spacing: .08em; text-transform: uppercase; }
+.task-wizard__heading h3 { margin: 3px 0 0; color: #18181b; font-size: clamp(18px,2.4vw,25px); line-height: 1.15; font-weight: 950; }
+.task-wizard__heading p { margin: 5px 0 0; color: #71717a; font-size: 12px; }
+.task-wizard__actions { align-items: center; justify-content: space-between; }
+.task-wizard__action-group { display: flex; align-items: center; gap: 8px; }
+.task-wizard__actions .btn-primary { min-width: 145px; }
+.task-wizard__actions .btn-primary span { margin-left: 6px; font-size: 17px; line-height: 1; }
+
+.task-wizard__review { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+.task-wizard__review-main,
+.task-wizard__review-item,
+.task-wizard__review-notes { min-width: 0; border: 1px solid #e4e4e7; border-radius: 11px; background: #fff; padding: 10px 11px; }
+.task-wizard__review-main { grid-column: 1 / -1; border-color: rgba(190,30,114,.2); background: #FDF2F8; }
+.task-wizard__review span { display: block; margin-bottom: 3px; color: #71717a; font-size: 9px; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; }
+.task-wizard__review strong { display: block; overflow: hidden; color: #27272a; font-size: 12px; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
+.task-wizard__review-main strong { color: #8E1557; font-size: 16px; }
+.task-wizard__review-main small { display: block; margin-top: 2px; color: #71717a; font-size: 11px; }
+.task-wizard__review-notes { grid-column: 1 / -1; }
+.task-wizard__review-notes p { margin: 0; color: #3f3f46; font-size: 11px; line-height: 1.45; }
+
 .workspace-toast {
   position: fixed;
   top: calc(76px + var(--safe-top));
@@ -459,4 +525,13 @@ button { touch-action: manipulation; }
   .workspace-modal__body { max-height: calc(94dvh - 88px); padding: 14px; }
   .modal-actions { position: sticky; bottom: -14px; margin-right: -14px; margin-left: -14px; background: #fff; padding: 12px 14px calc(12px + var(--safe-bottom)); }
   .modal-actions .btn { min-width: 0; flex: 1; }
+  .task-wizard__progress-item { min-height: 37px; justify-content: center; padding: 5px; }
+  .task-wizard__progress-item span { width: 24px; height: 24px; }
+  .task-wizard__progress-item strong { display: none; }
+  .task-wizard__step { min-height: 0; padding: 14px; }
+  .task-wizard__actions { gap: 6px; }
+  .task-wizard__action-group { flex: 1; justify-content: flex-end; gap: 6px; }
+  .task-wizard__actions .btn-primary,
+  .task-wizard__actions .btn-secondary { min-width: 0; padding-right: 11px; padding-left: 11px; }
+  .task-wizard__review { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
