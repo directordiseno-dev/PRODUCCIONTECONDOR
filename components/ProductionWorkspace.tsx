@@ -168,6 +168,10 @@ export function ProductionWorkspace({ data, email }: { data: ProductionWorkspace
         </div>
       </main>
 
+      <button type="button" className="mobile-primary-action" onClick={runPrimaryAction}>
+        <span aria-hidden="true">+</span>{primaryActionLabel}
+      </button>
+
       {feedback ? <WorkspaceToast feedback={feedback} /> : null}
 
       <WorkspaceModalPanel open={modal === "task"} title="Crear tarea de produccion" detail="Asigna el trabajo sin salir del tablero." onClose={() => setModal(null)} wide>

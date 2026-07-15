@@ -169,6 +169,7 @@ button { touch-action: manipulation; }
   box-shadow: 0 10px 24px rgba(190,30,114,.2);
 }
 .header-primary-action span { font-size: 18px; line-height: 1; }
+.mobile-primary-action { display: none; }
 
 .install-button, .user-button {
   display: inline-flex;
@@ -522,6 +523,27 @@ button { touch-action: manipulation; }
   .header-primary-action { display: none; }
   .plant-nav { justify-content: space-between; }
   .plant-nav button { padding-right: 7px; padding-left: 7px; font-size: 10px; }
+  .production-main { padding-bottom: calc(82px + var(--safe-bottom)); }
+  .mobile-primary-action {
+    position: fixed;
+    right: calc(12px + var(--safe-right));
+    bottom: calc(12px + var(--safe-bottom));
+    z-index: 70;
+    display: inline-flex;
+    min-height: 54px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border: 0;
+    border-radius: 17px;
+    background: #BE1E72;
+    padding: 0 19px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 950;
+    box-shadow: 0 15px 38px rgba(142,21,87,.35);
+  }
+  .mobile-primary-action span { font-size: 25px; line-height: 1; }
 }
 
 @media (max-width: 520px) {
