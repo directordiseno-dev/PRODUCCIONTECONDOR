@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AppHeader, type AppNotification } from "@/components/AppHeader";
+import { AppHeader } from "@/components/AppHeader";
 import {
   consumeProductionMaterial,
   createInventoryItem,
@@ -70,9 +70,9 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
   const [isPending, startTransition] = useTransition();
   const knownNotificationIds = useRef<Set<string> | null>(null);
 
-  const visibleTasks = data.tasks.filter((task) => task.status !== "cancelada").slice(0, 80);
+  const visibleTasks = data.tasks.filter((task) => task.status !== "cancelada");
   const activeTasks = visibleTasks.filter((task) => !["terminada", "revisada"].includes(task.status));
-  const taskNotifications = useMemo<AppNotification[]>(() => data.tasks
+  const taskNotifications = useMemo(() => data.tasks
     .filter((task) => task.status === "terminada" && taskBelongsToUser(task, email, userName))
     .map((task) => ({
       id: task.id,
@@ -110,7 +110,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
 
     void navigator.serviceWorker.ready.then((registration) => Promise.all(newNotifications.map((notification) => registration.showNotification(
       "Tarea de produccion terminada",
-      { body: notification.title, tag: `production-task-${notification.id}`, data: { url: "/" } },
+      { body: notification.title, tag: `production-task-${notification.id}`, data: { url: `/#task-${notification.id}` } },
     ))));
   }, [taskNotifications]);
 
@@ -166,10 +166,10 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
         email={email}
         activeSection={activeTab}
         primaryActionLabel={primaryActionLabel}
-        notifications={taskNotifications}
+        notificationCount={taskNotifications.length}
         onSectionChange={setActiveTab}
         onPrimaryAction={runPrimaryAction}
-        onOpenNotification={(id) => { setHighlightedTaskId(id); setActiveTab("tareas"); }}
+        onNotificationsClick={() => { setHighlightedTaskId(taskNotifications[0]?.id || ""); setActiveTab("tareas"); }}
       />
       <main className="production-main">
         <div className="production-workspace">
@@ -483,14 +483,17 @@ function TasksTab({
   onConsumeTask: (taskId?: string) => void;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
 }) {
-  const [filter, setFilter] = useState<"activas" | "mias" | ProductionTaskStatus>("activas");
-  const filteredTasks = filter === "activas"
+  const [filter, setFilter] = useState<"todas" | "activas" | "mias" | ProductionTaskStatus>("todas");
+  const filteredTasks = filter === "todas"
+    ? tasks
+    : filter === "activas"
     ? tasks.filter((task) => !["terminada", "revisada", "cancelada"].includes(task.status))
     : filter === "mias"
       ? tasks.filter((task) => taskBelongsToUser(task, email, userName))
       : tasks.filter((task) => task.status === filter);
   const activeCount = tasks.filter((task) => !["terminada", "revisada", "cancelada"].includes(task.status)).length;
-  const filters: Array<["activas" | "mias" | ProductionTaskStatus, string]> = [
+  const filters: Array<["todas" | "activas" | "mias" | ProductionTaskStatus, string]> = [
+    ["todas", "Todas"],
     ["mias", "Mis tareas"],
     ["activas", "Activas"],
     ["pendiente", "Pendientes"],
@@ -500,11 +503,11 @@ function TasksTab({
   ];
 
   useEffect(() => {
-    if (highlightedTaskId) setFilter("mias");
+    if (highlightedTaskId) setFilter("todas");
   }, [highlightedTaskId]);
 
   useEffect(() => {
-    if (!highlightedTaskId || filter !== "mias") return;
+    if (!highlightedTaskId || filter !== "todas") return;
     const timeout = window.setTimeout(() => document.getElementById(`task-${highlightedTaskId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
     return () => window.clearTimeout(timeout);
   }, [filter, highlightedTaskId]);
@@ -611,8 +614,17 @@ function TaskRow({
     revisada: "border-l-tecondor-magenta",
     cancelada: "border-l-neutral-300",
   };
+  const statusSurface: Record<ProductionTaskStatus, string> = {
+    pendiente: "bg-amber-50/70 border-amber-200",
+    en_proceso: "bg-sky-50/70 border-sky-200",
+    pausada: "bg-neutral-100 border-neutral-300",
+    bloqueada: "bg-red-50/70 border-red-200",
+    terminada: "bg-emerald-50/75 border-emerald-200",
+    revisada: "bg-fuchsia-50/60 border-fuchsia-200",
+    cancelada: "bg-neutral-50 border-neutral-200 opacity-70",
+  };
   return (
-    <div id={`task-${task.id}`} className={cn("task-row grid gap-4 rounded-2xl border border-l-4 border-neutral-200 bg-white px-4 py-4 shadow-sm transition hover:border-neutral-300 hover:shadow-md md:grid-cols-[1fr_auto] md:items-center", statusAccent[task.status], highlighted && "task-row--highlighted")}>
+    <div id={`task-${task.id}`} className={cn("task-row grid gap-4 rounded-2xl border border-l-4 px-4 py-4 shadow-sm transition hover:shadow-md md:grid-cols-[1fr_auto] md:items-center", statusAccent[task.status], statusSurface[task.status], highlighted && "task-row--highlighted")}>
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full bg-neutral-950 px-2.5 py-1 font-mono text-xs font-black text-white">TP-{String(task.task_number || 0).padStart(4, "0")}</span>
@@ -621,9 +633,10 @@ function TaskRow({
           {task.cost_center_code ? <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-bold text-neutral-600">{task.cost_center_code}</span> : null}
         </div>
         <div className="mt-3 text-lg font-black leading-tight text-neutral-950">{task.title}</div>
-        <div className="mt-3 grid gap-2 text-xs text-neutral-600 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-3 grid gap-2 text-xs text-neutral-600 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <TaskFact label="Creada por" value={createdByLabel(task.created_by)} />
+          <TaskFact label="Responsable" value={task.assigned_to || "Sin responsable"} />
           <TaskFact label="Proceso" value={task.process_type} />
-          <TaskFact label="Operario" value={task.assigned_to || "Sin responsable"} />
           <TaskFact label="Cantidad" value={`${formatQuantity(task.planned_quantity)} und`} />
           <TaskFact label="Tiempo" value={task.estimated_minutes ? `${task.estimated_minutes} min` : "Sin estimar"} />
         </div>
@@ -1547,6 +1560,17 @@ function supplierLabel(supplier: Supplier): string {
 function costCenterLabel(costCenter: CostCenterOption): string {
   const name = costCenter.name || costCenter.client_name;
   return `${costCenter.code}${name ? ` - ${name}` : ""}`;
+}
+
+function createdByLabel(value: string | null): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "Sin registro";
+  const localPart = raw.includes("@") ? raw.split("@")[0] : raw;
+  return localPart
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
 }
 
 function taskBelongsToUser(task: ProductionTask, email: string, userName: string): boolean {
