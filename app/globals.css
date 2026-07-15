@@ -171,6 +171,60 @@ button { touch-action: manipulation; }
 .header-primary-action span { font-size: 18px; line-height: 1; }
 .mobile-primary-action { display: none; }
 
+.notification-center { position: relative; }
+.notification-button {
+  position: relative;
+  display: inline-flex;
+  min-width: 50px;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fff;
+  padding: 0 9px;
+  color: #52525b;
+  font-size: 10px;
+  font-weight: 900;
+}
+.notification-button.has-alerts { border-color: rgba(190,30,114,.25); background: #FCE4F0; color: #8E1557; }
+.notification-button b {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: #BE1E72;
+  padding: 0 4px;
+  color: #fff;
+  font-size: 9px;
+}
+.notification-popover {
+  position: absolute;
+  top: calc(100% + 9px);
+  right: 0;
+  z-index: 90;
+  width: min(360px, calc(100vw - 24px));
+  overflow: hidden;
+  border: 1px solid #e4e4e7;
+  border-radius: 15px;
+  background: #fff;
+  box-shadow: 0 22px 60px rgba(15,23,42,.2);
+}
+.notification-popover__header { padding: 12px 13px 10px; border-bottom: 1px solid #f1f5f9; background: #fafafa; }
+.notification-popover__header strong { display: block; font-size: 13px; }
+.notification-popover__header small { color: #71717a; font-size: 10px; }
+.notification-popover__list { max-height: 330px; overflow-y: auto; padding: 5px; }
+.notification-popover__list button { display: block; width: 100%; border: 0; border-radius: 10px; background: transparent; padding: 9px; text-align: left; }
+.notification-popover__list button:hover { background: #FCE4F0; }
+.notification-popover__list button strong { display: block; color: #27272a; font-size: 11px; }
+.notification-popover__list button span { display: block; margin-top: 2px; color: #71717a; font-size: 10px; }
+.notification-popover__list p { margin: 0; padding: 16px 12px; color: #71717a; font-size: 11px; line-height: 1.45; text-align: center; }
+
 .install-button, .user-button {
   display: inline-flex;
   min-height: 36px;
@@ -296,6 +350,7 @@ button { touch-action: manipulation; }
 .task-filters::-webkit-scrollbar { display: none; }
 .task-filters button { flex: 0 0 auto; min-height: 36px; border: 1px solid #e5e7eb; border-radius: 999px; background: #fff; padding: 0 13px; color: #52525b; font-size: 12px; font-weight: 800; }
 .task-filters button.is-active { border-color: rgba(190,30,114,.18); background: #FCE4F0; color: #8E1557; }
+.task-row--highlighted { border-color: #BE1E72; box-shadow: 0 0 0 3px rgba(190,30,114,.12), 0 12px 30px rgba(15,23,42,.1); }
 
 .workspace-modal {
   position: fixed;
@@ -523,6 +578,10 @@ button { touch-action: manipulation; }
   .header-primary-action { display: none; }
   .plant-nav { justify-content: space-between; }
   .plant-nav button { padding-right: 7px; padding-left: 7px; font-size: 10px; }
+  .notification-button { width: 38px; min-width: 38px; padding: 0; }
+  .notification-button span { font-size: 0; }
+  .notification-button span::after { content: "!"; font-size: 16px; }
+  .notification-popover { position: fixed; top: calc(57px + var(--safe-top)); right: 8px; left: 8px; width: auto; }
   .production-main { padding-bottom: calc(82px + var(--safe-bottom)); }
   .mobile-primary-action {
     position: fixed;

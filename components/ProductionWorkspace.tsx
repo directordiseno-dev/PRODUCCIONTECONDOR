@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AppHeader } from "@/components/AppHeader";
+import { AppHeader, type AppNotification } from "@/components/AppHeader";
 import {
   consumeProductionMaterial,
   createInventoryItem,
@@ -60,22 +60,59 @@ const statusLabels: Record<ProductionTaskStatus, string> = {
   cancelada: "Cancelada",
 };
 
-export function ProductionWorkspace({ data, email }: { data: ProductionWorkspaceData; email: string }) {
+export function ProductionWorkspace({ data, email, userName }: { data: ProductionWorkspaceData; email: string; userName: string }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("tareas");
   const [modal, setModal] = useState<WorkspaceModal>(null);
   const [consumptionTaskId, setConsumptionTaskId] = useState("");
+  const [highlightedTaskId, setHighlightedTaskId] = useState("");
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [isPending, startTransition] = useTransition();
+  const knownNotificationIds = useRef<Set<string> | null>(null);
 
   const visibleTasks = data.tasks.filter((task) => task.status !== "cancelada").slice(0, 80);
   const activeTasks = visibleTasks.filter((task) => !["terminada", "revisada"].includes(task.status));
+  const taskNotifications = useMemo<AppNotification[]>(() => data.tasks
+    .filter((task) => task.status === "terminada" && taskBelongsToUser(task, email, userName))
+    .map((task) => ({
+      id: task.id,
+      title: `TP-${String(task.task_number || 0).padStart(4, "0")} · ${task.title}`,
+      detail: `${task.assigned_to || "Operario"} termino esta tarea`,
+    })), [data.tasks, email, userName]);
 
   useEffect(() => {
     if (!feedback || feedback.type === "info") return;
     const timeout = window.setTimeout(() => setFeedback(null), 4200);
     return () => window.clearTimeout(timeout);
   }, [feedback]);
+
+  useEffect(() => {
+    const refresh = () => router.refresh();
+    const interval = window.setInterval(refresh, 30000);
+    const onVisibilityChange = () => { if (document.visibilityState === "visible") refresh(); };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [router]);
+
+  useEffect(() => {
+    const currentIds = new Set(taskNotifications.map((notification) => notification.id));
+    if (!knownNotificationIds.current) {
+      knownNotificationIds.current = currentIds;
+      return;
+    }
+
+    const newNotifications = taskNotifications.filter((notification) => !knownNotificationIds.current?.has(notification.id));
+    knownNotificationIds.current = currentIds;
+    if (!newNotifications.length || !("Notification" in window) || Notification.permission !== "granted" || !("serviceWorker" in navigator)) return;
+
+    void navigator.serviceWorker.ready.then((registration) => Promise.all(newNotifications.map((notification) => registration.showNotification(
+      "Tarea de produccion terminada",
+      { body: notification.title, tag: `production-task-${notification.id}`, data: { url: "/" } },
+    ))));
+  }, [taskNotifications]);
 
   function openConsumption(taskId = "") {
     setConsumptionTaskId(taskId);
@@ -129,8 +166,10 @@ export function ProductionWorkspace({ data, email }: { data: ProductionWorkspace
         email={email}
         activeSection={activeTab}
         primaryActionLabel={primaryActionLabel}
+        notifications={taskNotifications}
         onSectionChange={setActiveTab}
         onPrimaryAction={runPrimaryAction}
+        onOpenNotification={(id) => { setHighlightedTaskId(id); setActiveTab("tareas"); }}
       />
       <main className="production-main">
         <div className="production-workspace">
@@ -149,6 +188,9 @@ export function ProductionWorkspace({ data, email }: { data: ProductionWorkspace
             <TasksTab
               tasks={visibleTasks}
               pending={isPending}
+              email={email}
+              userName={userName}
+              highlightedTaskId={highlightedTaskId}
               onConsumeTask={openConsumption}
               onStatus={(task, status) => runAction("Actualizando tarea...", () => updateProductionTaskStatus(task.id, status), "Tarea actualizada.")}
             />
@@ -427,26 +469,45 @@ function InventoryTab({
 function TasksTab({
   tasks,
   pending,
+  email,
+  userName,
+  highlightedTaskId,
   onConsumeTask,
   onStatus,
 }: {
   tasks: ProductionTask[];
   pending: boolean;
+  email: string;
+  userName: string;
+  highlightedTaskId: string;
   onConsumeTask: (taskId?: string) => void;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
 }) {
-  const [filter, setFilter] = useState<"activas" | ProductionTaskStatus>("activas");
+  const [filter, setFilter] = useState<"activas" | "mias" | ProductionTaskStatus>("activas");
   const filteredTasks = filter === "activas"
     ? tasks.filter((task) => !["terminada", "revisada", "cancelada"].includes(task.status))
-    : tasks.filter((task) => task.status === filter);
+    : filter === "mias"
+      ? tasks.filter((task) => taskBelongsToUser(task, email, userName))
+      : tasks.filter((task) => task.status === filter);
   const activeCount = tasks.filter((task) => !["terminada", "revisada", "cancelada"].includes(task.status)).length;
-  const filters: Array<["activas" | ProductionTaskStatus, string]> = [
+  const filters: Array<["activas" | "mias" | ProductionTaskStatus, string]> = [
+    ["mias", "Mis tareas"],
     ["activas", "Activas"],
     ["pendiente", "Pendientes"],
     ["en_proceso", "En proceso"],
     ["terminada", "Terminadas"],
     ["revisada", "Revisadas"],
   ];
+
+  useEffect(() => {
+    if (highlightedTaskId) setFilter("mias");
+  }, [highlightedTaskId]);
+
+  useEffect(() => {
+    if (!highlightedTaskId || filter !== "mias") return;
+    const timeout = window.setTimeout(() => document.getElementById(`task-${highlightedTaskId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
+    return () => window.clearTimeout(timeout);
+  }, [filter, highlightedTaskId]);
 
   return (
     <div className="workspace-section workspace-section--tasks">
@@ -467,7 +528,7 @@ function TasksTab({
       <Panel title="Tareas de planta" detail="Inicia, pausa, termina o registra material desde la misma fila.">
         <div className="workspace-list divide-y divide-neutral-100">
           {filteredTasks.map((task) => (
-            <TaskRow key={task.id} task={task} pending={pending} onStatus={onStatus} onConsume={() => onConsumeTask(task.id)} />
+            <TaskRow key={task.id} task={task} pending={pending} highlighted={task.id === highlightedTaskId} onStatus={onStatus} onConsume={() => onConsumeTask(task.id)} />
           ))}
           {!filteredTasks.length ? <EmptyState title="No hay tareas en esta vista" detail="Cambia el filtro o crea una nueva tarea de produccion." /> : null}
         </div>
@@ -531,11 +592,13 @@ function ConsumptionTab({
 function TaskRow({
   task,
   pending,
+  highlighted,
   onStatus,
   onConsume,
 }: {
   task: ProductionTask;
   pending: boolean;
+  highlighted?: boolean;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
   onConsume?: () => void;
 }) {
@@ -549,7 +612,7 @@ function TaskRow({
     cancelada: "border-l-neutral-300",
   };
   return (
-    <div className={cn("task-row grid gap-4 rounded-2xl border border-l-4 border-neutral-200 bg-white px-4 py-4 shadow-sm transition hover:border-neutral-300 hover:shadow-md md:grid-cols-[1fr_auto] md:items-center", statusAccent[task.status])}>
+    <div id={`task-${task.id}`} className={cn("task-row grid gap-4 rounded-2xl border border-l-4 border-neutral-200 bg-white px-4 py-4 shadow-sm transition hover:border-neutral-300 hover:shadow-md md:grid-cols-[1fr_auto] md:items-center", statusAccent[task.status], highlighted && "task-row--highlighted")}>
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full bg-neutral-950 px-2.5 py-1 font-mono text-xs font-black text-white">TP-{String(task.task_number || 0).padStart(4, "0")}</span>
@@ -1484,6 +1547,17 @@ function supplierLabel(supplier: Supplier): string {
 function costCenterLabel(costCenter: CostCenterOption): string {
   const name = costCenter.name || costCenter.client_name;
   return `${costCenter.code}${name ? ` - ${name}` : ""}`;
+}
+
+function taskBelongsToUser(task: ProductionTask, email: string, userName: string): boolean {
+  const normalizedEmail = normalizeSearchText(email);
+  if (normalizedEmail && normalizeSearchText(task.created_by || "") === normalizedEmail) return true;
+
+  const assignedWords = new Set(normalizeSearchText(task.assigned_to || "").split(/[^a-z0-9]+/).filter(Boolean));
+  const identityTokens = normalizeSearchText(`${userName} ${email.split("@")[0]}`)
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length >= 4 && !["usuario", "produccion", "tecondor"].includes(token));
+  return identityTokens.some((token) => assignedWords.has(token));
 }
 
 function taskLabel(task: ProductionTask): string {

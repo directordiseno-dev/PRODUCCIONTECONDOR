@@ -13,7 +13,11 @@ export default async function HomePage() {
 
   return (
     <div className="production-app">
-      <ProductionWorkspace data={data} email={user?.email ?? "produccion@tecondor.com"} />
+      <ProductionWorkspace
+        data={data}
+        email={user?.email ?? "produccion@tecondor.com"}
+        userName={String(user?.user_metadata?.full_name || user?.user_metadata?.name || user?.email?.split("@")[0] || "Usuario")}
+      />
     </div>
   );
 }
