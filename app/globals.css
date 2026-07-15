@@ -549,3 +549,51 @@ button { touch-action: manipulation; }
   .task-wizard__actions .btn-secondary { min-width: 0; padding-right: 11px; padding-left: 11px; }
   .task-wizard__review { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
+
+@media (orientation: landscape) and (max-height: 600px) {
+  .workspace-modal--typing {
+    align-items: stretch;
+    justify-items: start;
+    padding: calc(5px + var(--safe-top)) 4px calc(5px + var(--safe-bottom)) calc(5px + var(--safe-left));
+  }
+  .workspace-modal--typing .workspace-modal__panel,
+  .workspace-modal--typing .workspace-modal__panel--wide {
+    width: min(61vw, 680px);
+    max-height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 10px);
+    border-radius: 15px;
+  }
+  .workspace-modal--typing .workspace-modal__header {
+    align-items: center;
+    padding: 6px 9px;
+  }
+  .workspace-modal--typing .workspace-modal__header span,
+  .workspace-modal--typing .workspace-modal__header p { display: none; }
+  .workspace-modal--typing .workspace-modal__header h2 { margin: 0; font-size: 15px; }
+  .workspace-modal--typing .workspace-modal__close { width: 31px; height: 31px; border-radius: 9px; font-size: 20px; }
+  .workspace-modal--typing .workspace-modal__body {
+    max-height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 54px);
+    padding: 7px;
+  }
+  .workspace-modal--typing .task-wizard { gap: 6px; }
+  .workspace-modal--typing .task-wizard__progress { gap: 3px; }
+  .workspace-modal--typing .task-wizard__progress-item { min-height: 29px; justify-content: center; padding: 2px; }
+  .workspace-modal--typing .task-wizard__progress-item span { width: 22px; height: 22px; }
+  .workspace-modal--typing .task-wizard__progress-item strong { display: none; }
+  .workspace-modal--typing .task-wizard__step { min-height: 0; gap: 7px; padding: 8px; }
+  .workspace-modal--typing .task-wizard__heading span { display: none; }
+  .workspace-modal--typing .task-wizard__heading h3 { margin: 0; font-size: 15px; }
+  .workspace-modal--typing .task-wizard__heading p { display: none; }
+  .workspace-modal--typing .modal-form__grid { gap: 7px; }
+  .workspace-modal--typing .label { margin-bottom: 2px; font-size: 10px; }
+  .workspace-modal--typing .input { min-height: 38px; padding-top: 6px; padding-bottom: 6px; font-size: 16px; }
+  .workspace-modal--typing .modal-actions {
+    position: sticky;
+    bottom: -7px;
+    margin-right: -7px;
+    margin-left: -7px;
+    background: #fff;
+    padding: 7px;
+  }
+  .workspace-modal--typing .task-wizard__actions .btn-primary,
+  .workspace-modal--typing .task-wizard__actions .btn-secondary { min-height: 38px; padding: 5px 9px; font-size: 11px; }
+}

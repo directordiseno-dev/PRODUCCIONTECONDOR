@@ -655,8 +655,13 @@ function WorkspaceModalPanel({
   wide?: boolean;
   children: React.ReactNode;
 }) {
+  const [typing, setTyping] = useState(false);
+
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setTyping(false);
+      return;
+    }
     const previousOverflow = document.body.style.overflow;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
@@ -672,7 +677,24 @@ function WorkspaceModalPanel({
   if (!open) return null;
 
   return (
-    <div className="workspace-modal" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div
+      className={cn("workspace-modal", typing && "workspace-modal--typing")}
+      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
+      onFocusCapture={(event) => {
+        const target = event.target;
+        const textInput = target instanceof HTMLInputElement && !["date", "checkbox", "radio", "hidden", "button", "submit"].includes(target.type);
+        if (!textInput && !(target instanceof HTMLTextAreaElement)) return;
+        setTyping(true);
+        window.setTimeout(() => target.scrollIntoView({ block: "nearest", inline: "nearest" }), 220);
+      }}
+      onBlurCapture={() => {
+        window.setTimeout(() => {
+          const active = document.activeElement;
+          const textInput = active instanceof HTMLInputElement && !["date", "checkbox", "radio", "hidden", "button", "submit"].includes(active.type);
+          if (!textInput && !(active instanceof HTMLTextAreaElement)) setTyping(false);
+        }, 0);
+      }}
+    >
       <section className={cn("workspace-modal__panel", wide && "workspace-modal__panel--wide")} role="dialog" aria-modal="true" aria-label={title}>
         <header className="workspace-modal__header">
           <div>
