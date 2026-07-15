@@ -1,4 +1,3 @@
-import { AppHeader } from "@/components/AppHeader";
 import { ProductionWorkspace } from "@/components/ProductionWorkspace";
 import { listProductionWorkspaceData } from "@/app/actions/produccion";
 import { createClient } from "@/lib/supabase/server";
@@ -14,10 +13,7 @@ export default async function HomePage() {
 
   return (
     <div className="production-app">
-      <AppHeader email={user?.email ?? "produccion@tecondor.com"} />
-      <main className="production-main">
-        <ProductionWorkspace data={data} />
-      </main>
+      <ProductionWorkspace data={data} email={user?.email ?? "produccion@tecondor.com"} />
     </div>
   );
 }

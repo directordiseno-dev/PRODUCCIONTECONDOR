@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { AppHeader } from "@/components/AppHeader";
 import {
   consumeProductionMaterial,
   createInventoryItem,
@@ -66,7 +67,7 @@ const statusLabels: Record<ProductionTaskStatus, string> = {
   cancelada: "Cancelada",
 };
 
-export function ProductionWorkspace({ data }: { data: ProductionWorkspaceData }) {
+export function ProductionWorkspace({ data, email }: { data: ProductionWorkspaceData; email: string }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("inicio");
   const [modal, setModal] = useState<WorkspaceModal>(null);
@@ -92,6 +93,24 @@ export function ProductionWorkspace({ data }: { data: ProductionWorkspaceData })
     setModal("consumption");
   }
 
+  function runPrimaryAction() {
+    if (activeTab === "inventario") {
+      setModal("item");
+      return;
+    }
+    if (activeTab === "consumos") {
+      openConsumption();
+      return;
+    }
+    setModal("task");
+  }
+
+  const primaryActionLabel = activeTab === "inventario"
+    ? "Nuevo item"
+    : activeTab === "consumos"
+      ? "Registrar consumo"
+      : "Nueva tarea";
+
   function runAction(
     label: string,
     action: () => Promise<unknown>,
@@ -116,36 +135,17 @@ export function ProductionWorkspace({ data }: { data: ProductionWorkspaceData })
   }
 
   return (
-    <div className="production-workspace">
-      <section className="production-console">
-        <aside className="production-tabs" aria-label="Secciones de produccion">
-          <div className="production-tabs__heading">
-            <span>Control de planta</span>
-            <strong>Operacion diaria</strong>
-          </div>
-          <div className="production-tabs__grid">
-            {tabs.map((tab, index) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveTab(tab.id)}
-                className={cn("production-tab", activeTab === tab.id && "is-active")}
-                aria-current={activeTab === tab.id ? "page" : undefined}
-              >
-                <span className="production-tab__icon">{String(index + 1).padStart(2, "0")}</span>
-                <span className="production-tab__copy">
-                  <strong>{tab.label}</strong>
-                  <small>{tab.detail}</small>
-                </span>
-              </button>
-            ))}
-          </div>
-          <div className="production-tabs__quick">
-            <button type="button" className="btn-primary" onClick={() => setModal("task")}>+ Nueva tarea</button>
-            <button type="button" className="btn-secondary" onClick={() => openConsumption()}>+ Registrar consumo</button>
-          </div>
-        </aside>
-
+    <>
+      <AppHeader
+        email={email}
+        activeSection={activeTab}
+        primaryActionLabel={primaryActionLabel}
+        onSectionChange={setActiveTab}
+        onPrimaryAction={runPrimaryAction}
+      />
+      <main className="production-main">
+        <div className="production-workspace">
+          <section className="production-console">
         <div className="production-console__main">
           <header className="production-commandbar">
             <div className="production-commandbar__title">
@@ -160,8 +160,9 @@ export function ProductionWorkspace({ data }: { data: ProductionWorkspaceData })
               <Metric label="Consumo mes" value={formatCOP(metrics.monthConsumption)} detail="salidas" tone="sky" />
             </div>
             <div className="production-commandbar__actions">
-              <button type="button" className="btn-primary" onClick={() => setModal("task")}>Nueva tarea</button>
-              <button type="button" className="btn-secondary" onClick={() => openConsumption()}>Consumo</button>
+              <button type="button" className="btn-primary production-primary-action" onClick={runPrimaryAction}>
+                <span>+</span>{primaryActionLabel}
+              </button>
             </div>
           </header>
 
@@ -209,8 +210,10 @@ export function ProductionWorkspace({ data }: { data: ProductionWorkspaceData })
             />
           ) : null}
           </div>
+            </div>
+          </section>
         </div>
-      </section>
+      </main>
 
       {feedback ? <WorkspaceToast feedback={feedback} /> : null}
 
@@ -253,7 +256,7 @@ export function ProductionWorkspace({ data }: { data: ProductionWorkspaceData })
           onSubmit={(form) => runAction("Registrando movimiento de inventario...", () => createInventoryMovement(form), "Movimiento registrado.", () => { setModal(null); setActiveTab("inventario"); })}
         />
       </WorkspaceModalPanel>
-    </div>
+    </>
   );
 }
 
@@ -294,18 +297,16 @@ function ProductionHome({
   const statusSummary = {
     pendiente: tasks.filter((task) => task.status === "pendiente").length,
     enProceso: tasks.filter((task) => task.status === "en_proceso").length,
-    bloqueada: tasks.filter((task) => task.status === "bloqueada").length,
     pausada: tasks.filter((task) => task.status === "pausada").length,
   };
 
   return (
     <div className="production-home space-y-4">
       <div className="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-3 gap-3">
           <StatusTile label="Pendientes" value={statusSummary.pendiente} tone="amber" />
           <StatusTile label="En proceso" value={statusSummary.enProceso} tone="sky" />
           <StatusTile label="Pausadas" value={statusSummary.pausada} tone="neutral" />
-          <StatusTile label="Bloqueadas" value={statusSummary.bloqueada} tone="red" />
         </div>
         <div className="grid grid-cols-3 gap-2 rounded-xl border border-neutral-200 bg-white p-2 shadow-sm">
           <QuickActionButton label="Tarea" detail="crear" onClick={onCreateTask} />
@@ -313,8 +314,6 @@ function ProductionHome({
           <QuickActionButton label="Stock" detail="revisar" onClick={() => onOpenTab("inventario")} />
         </div>
       </div>
-
-      <ProcessRail tasks={tasks} />
 
       <div className="grid gap-4 xl:grid-cols-[1.35fr_0.85fr]">
         <div className="rounded-2xl border border-neutral-200 bg-white shadow-sm">
@@ -390,43 +389,6 @@ function QuickActionButton({ label, detail, onClick }: { label: string; detail: 
       <span className="block text-sm font-black text-neutral-950">{label}</span>
       <span className="mt-0.5 block text-xs font-semibold text-tecondor-magenta">{detail}</span>
     </button>
-  );
-}
-
-function ProcessRail({ tasks }: { tasks: ProductionTask[] }) {
-  const visibleProcesses = processOptions.slice(0, 8);
-  return (
-    <div className="rounded-2xl border border-neutral-200 bg-white p-3 shadow-sm">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <h2 className="text-sm font-black text-neutral-950">Estaciones de trabajo</h2>
-        <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-bold text-neutral-600">{tasks.length} tareas</span>
-      </div>
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        {visibleProcesses.map((process) => {
-          const total = tasks.filter((task) => task.process_type === process).length;
-          const running = tasks.filter((task) => task.process_type === process && task.status === "en_proceso").length;
-          return (
-            <div key={process} className="rounded-xl border border-neutral-100 bg-neutral-50 px-3 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <span className="truncate text-sm font-bold text-neutral-800">{process}</span>
-                <span className={cn(
-                  "rounded-full px-2 py-0.5 text-xs font-black",
-                  running ? "bg-sky-100 text-sky-800" : total ? "bg-tecondor-magentaLight text-tecondor-magentaDark" : "bg-white text-neutral-500",
-                )}>
-                  {total}
-                </span>
-              </div>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white">
-                <div
-                  className={cn("h-full rounded-full", running ? "bg-sky-500" : total ? "bg-tecondor-magenta" : "bg-neutral-200")}
-                  style={{ width: `${total ? Math.min(100, 25 + total * 12) : 8}%` }}
-                />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
   );
 }
 
