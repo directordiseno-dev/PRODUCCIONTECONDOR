@@ -24,6 +24,17 @@ type SupabaseError = { message?: string; code?: string; hint?: string | null; de
 export async function listProductionWorkspaceData(): Promise<ProductionWorkspaceData> {
   const supabase = await createClient();
 
+  // Retiro puntual solicitado: TP-0001 se creo por error con 2 minutos y sin responsable.
+  // Se conserva el registro para auditoria, pero queda cancelado y desaparece del tablero.
+  await supabase
+    .from("production_tasks")
+    .update({ status: "cancelada", updated_at: new Date().toISOString() })
+    .eq("task_number", 1)
+    .eq("title", "Soldar")
+    .eq("estimated_minutes", 2)
+    .eq("status", "pendiente")
+    .is("assigned_to", null);
+
   const [itemsRes, tasksRes, movementsRes, materialsRes, centersRes, suppliersRes, employeesRes] = await Promise.all([
     supabase
       .from("inventory_items")

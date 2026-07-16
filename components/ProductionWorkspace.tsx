@@ -638,7 +638,7 @@ function TaskRow({
           <TaskFact label="Responsable" value={task.assigned_to || "Sin responsable"} />
           <TaskFact label="Proceso" value={task.process_type} />
           <TaskFact label="Cantidad" value={`${formatQuantity(task.planned_quantity)} und`} />
-          <TaskFact label="Tiempo" value={task.estimated_minutes ? `${task.estimated_minutes} min` : "Sin estimar"} />
+          <TaskFact label="Tiempo aprox." value={formatEstimatedHours(task.estimated_minutes)} />
         </div>
         {task.notes ? <p className="mt-2 line-clamp-2 text-xs text-neutral-500">{task.notes}</p> : null}
       </div>
@@ -804,7 +804,7 @@ function TaskCreateForm({
   onCancel: () => void;
 }) {
   const employeeOptions = useMemo(() => productionEmployeeOptions(employees), [employees]);
-  const steps = ["Trabajo", "Asignacion", "Planeacion", "Confirmar"];
+  const steps = ["Trabajo", "Asignacion", "Planeacion", "Confirmacion final"];
   const wizard = useFormWizard(steps.length);
 
   const selectedCostCenter = costCenters.find((costCenter) => costCenter.code === wizard.review.cost_center_code);
@@ -830,7 +830,7 @@ function TaskCreateForm({
           assigned_to: textValue(formData, "assigned_to"),
           priority: textValue(formData, "priority") as ProductionTaskPriority,
           planned_quantity: numberValue(formData, "planned_quantity"),
-          estimated_minutes: numberValue(formData, "estimated_minutes"),
+          estimated_minutes: numberValue(formData, "estimated_hours") * 60,
           notes: textValue(formData, "notes"),
         });
       }}
@@ -854,13 +854,13 @@ function TaskCreateForm({
         <div className="modal-form__grid modal-form__grid--3">
           <SelectField name="priority" label="Prioridad" options={Object.entries(priorityLabels)} defaultValue="media" />
           <Field name="planned_quantity" label="Cantidad" type="number" step="0.001" min="0.001" defaultValue="1" required />
-          <Field name="estimated_minutes" label="Tiempo estimado (min)" type="number" min="0" placeholder="Ej. 90" />
+          <Field name="estimated_hours" label="Tiempo aprox. (horas)" type="number" step="1" min="1" placeholder="Ej. 2" />
         </div>
         <TextareaField name="notes" label="Indicaciones" placeholder="Material, medida, acabado o cuidado especial..." />
       </section>
 
       <section className="task-wizard__step" data-wizard-step="3" hidden={wizard.step !== 3}>
-        <WizardHeading eyebrow="Paso 4 de 4" title="Revisa antes de crear" detail="Si algo no esta bien, puedes regresar y corregirlo." />
+        <WizardHeading eyebrow="PASO FINAL · 4 DE 4" title="Confirma antes de crear" detail="Esta es la ultima pantalla. Revisa todo y luego confirma la creacion." />
         <div className="task-wizard__review">
           <div className="task-wizard__review-main">
             <span>Trabajo</span>
@@ -871,13 +871,13 @@ function TaskCreateForm({
           <ReviewItem label="Responsable" value={selectedEmployee || "Sin responsable"} />
           <ReviewItem label="Prioridad" value={selectedPriority || "Media"} />
           <ReviewItem label="Cantidad" value={wizard.review.planned_quantity || "1"} />
-          <ReviewItem label="Tiempo estimado" value={wizard.review.estimated_minutes ? `${wizard.review.estimated_minutes} min` : "Sin estimar"} />
+          <ReviewItem label="Tiempo aproximado" value={wizard.review.estimated_hours ? `${wizard.review.estimated_hours} h` : "Sin estimar"} />
           {wizard.review.notes ? <div className="task-wizard__review-notes"><span>Indicaciones</span><p>{wizard.review.notes}</p></div> : null}
         </div>
-        <div className="modal-hint">Al confirmar, la tarea quedara lista en el tablero de produccion.</div>
+        <div className="modal-hint"><strong>Paso final:</strong> al tocar “Confirmar y crear”, la tarea quedara lista en el tablero.</div>
       </section>
 
-      <WizardActions wizard={wizard} stepCount={steps.length} pending={pending} pendingLabel="Creando..." submitLabel="Crear tarea" onCancel={onCancel} />
+      <WizardActions wizard={wizard} stepCount={steps.length} pending={pending} pendingLabel="Creando..." submitLabel="Confirmar y crear" onCancel={onCancel} />
     </form>
   );
 }
@@ -1551,6 +1551,12 @@ function numberValue(formData: FormData, key: string): number {
   const normalized = raw.includes(",") ? raw.replace(/\./g, "").replace(",", ".") : raw;
   const value = Number(normalized);
   return Number.isFinite(value) ? value : 0;
+}
+
+function formatEstimatedHours(minutes: number): string {
+  if (!minutes || minutes <= 0) return "Sin estimar";
+  const hours = Math.round((minutes / 60) * 100) / 100;
+  return `${formatQuantity(hours)} h`;
 }
 
 function supplierLabel(supplier: Supplier): string {
