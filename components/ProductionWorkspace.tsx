@@ -19,6 +19,7 @@ import type {
   InventoryMovementType,
   ProductionEmployeeOption,
   ProductionTask,
+  ProductionTaskMaterial,
   ProductionTaskPriority,
   ProductionTaskStatus,
   ProductionWorkspaceData,
@@ -417,9 +418,14 @@ function InventoryTab({
   pending: boolean;
   onMovement: () => void;
 }) {
+  const [query, setQuery] = useState("");
+  const normalizedQuery = normalizeSearchText(query);
+  const filteredItems = useMemo(() => normalizedQuery
+    ? items.filter((item) => normalizeSearchText(`${item.code} ${item.name} ${item.category} ${item.location || ""}`).includes(normalizedQuery))
+    : items, [items, normalizedQuery]);
   const criticalStock = items.filter((item) => item.active && item.min_stock > 0 && item.stock <= item.min_stock).length;
   return (
-    <div className="workspace-section">
+    <div className="workspace-section workspace-section--inventory">
       <div className="section-toolbar">
         <div>
           <h2>Inventario actual</h2>
@@ -430,7 +436,12 @@ function InventoryTab({
           <button type="button" className="btn-secondary" disabled={pending} onClick={onMovement}>Movimiento</button>
         </div>
       </div>
-      <Panel title="Existencias" detail="Consulta rápida de stock, costo y ubicación.">
+      <label className="list-search">
+        <span>Buscar inventario</span>
+        <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Código, material, categoría o ubicación..." aria-label="Buscar en inventario" />
+        <b>{filteredItems.length}</b>
+      </label>
+      <Panel title="Existencias" detail={query ? `${filteredItems.length} coincidencias de ${items.length} items.` : "Consulta rápida de stock, costo y ubicación."}>
         <div className="workspace-table">
           <table className="min-w-full text-sm">
             <thead className="sticky top-0 bg-white text-xs uppercase text-neutral-500">
@@ -443,7 +454,7 @@ function InventoryTab({
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100">
-              {items.map((item) => (
+              {filteredItems.map((item) => (
                 <tr key={item.id}>
                   <td className="px-3 py-2">
                     <div className="font-bold">{item.name}</div>
@@ -459,7 +470,7 @@ function InventoryTab({
               ))}
             </tbody>
           </table>
-          {!items.length ? <EmptyState title="Inventario vacio" detail="Crea el primer item para empezar a controlar consumos." /> : null}
+          {!filteredItems.length ? <EmptyState title={items.length ? "Sin coincidencias" : "Inventario vacio"} detail={items.length ? "Prueba con otro nombre, código o ubicación." : "Crea el primer item para empezar a controlar consumos."} /> : null}
         </div>
       </Panel>
     </div>
@@ -492,14 +503,15 @@ function TasksTab({
       ? tasks.filter((task) => taskBelongsToUser(task, email, userName))
       : tasks.filter((task) => task.status === filter);
   const activeCount = tasks.filter((task) => !["terminada", "revisada", "cancelada"].includes(task.status)).length;
-  const filters: Array<["todas" | "activas" | "mias" | ProductionTaskStatus, string]> = [
-    ["todas", "Todas"],
-    ["mias", "Mis tareas"],
-    ["activas", "Activas"],
-    ["pendiente", "Pendientes"],
-    ["en_proceso", "En proceso"],
-    ["terminada", "Terminadas"],
-    ["revisada", "Revisadas"],
+  const filters: Array<["todas" | "activas" | "mias" | ProductionTaskStatus, string, number]> = [
+    ["todas", "Todas", tasks.length],
+    ["mias", "Mis tareas", tasks.filter((task) => taskBelongsToUser(task, email, userName)).length],
+    ["activas", "Activas", activeCount],
+    ["pendiente", "Pendientes", tasks.filter((task) => task.status === "pendiente").length],
+    ["en_proceso", "En proceso", tasks.filter((task) => task.status === "en_proceso").length],
+    ["pausada", "Pausadas", tasks.filter((task) => task.status === "pausada").length],
+    ["terminada", "Terminadas", tasks.filter((task) => task.status === "terminada").length],
+    ["revisada", "Revisadas", tasks.filter((task) => task.status === "revisada").length],
   ];
 
   useEffect(() => {
@@ -522,9 +534,9 @@ function TasksTab({
         <SectionStat value={activeCount} label="Tareas activas" tone="magenta" />
       </div>
       <div className="task-filters" aria-label="Filtrar tareas">
-        {filters.map(([value, label]) => (
+        {filters.map(([value, label, count]) => (
           <button key={value} type="button" className={cn(filter === value && "is-active")} onClick={() => setFilter(value)}>
-            {label}
+            <span>{label}</span><b>{count}</b>
           </button>
         ))}
       </div>
@@ -548,7 +560,7 @@ function ConsumptionTab({
 }: {
   tasks: ProductionTask[];
   items: InventoryItem[];
-  materials: { id: string; task_id: string; consumed_quantity: number; item?: InventoryItem | null }[];
+  materials: ProductionTaskMaterial[];
   movements: InventoryMovement[];
 }) {
   return (
@@ -565,20 +577,28 @@ function ConsumptionTab({
             <table className="min-w-full text-sm">
               <thead className="sticky top-0 bg-white text-xs uppercase text-neutral-500">
                 <tr>
+                  <th className="px-3 py-2 text-left">Tarea</th>
                   <th className="px-3 py-2 text-left">Material</th>
                   <th className="px-3 py-2 text-right">Consumido</th>
-                  <th className="px-3 py-2 text-right">Costo ref.</th>
+                  <th className="px-3 py-2 text-right">Costo consumido</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
                 {materials.slice(0, 80).map((material) => (
                   <tr key={material.id}>
                     <td className="px-3 py-2">
+                      <div className="font-mono text-xs font-black">{material.task ? `TP-${String(material.task.task_number || 0).padStart(4, "0")}` : "Tarea"}</div>
+                      <div className="max-w-48 truncate text-xs text-neutral-500">{material.task?.title || "Sin detalle"}</div>
+                    </td>
+                    <td className="px-3 py-2">
                       <div className="font-bold">{material.item?.name ?? "Item"}</div>
                       <div className="text-xs text-neutral-500">{material.item?.code ?? "-"}</div>
                     </td>
                     <td className="px-3 py-2 text-right">{formatQuantity(material.consumed_quantity)} {material.item?.unit ?? ""}</td>
-                    <td className="px-3 py-2 text-right">{formatCOP(Number(material.item?.average_cost || 0))}</td>
+                    <td className="px-3 py-2 text-right">
+                      <div className="font-bold">{formatCOP(material.consumed_quantity * material.unit_cost_snapshot)}</div>
+                      <div className="text-[10px] text-neutral-500">{formatCOP(material.unit_cost_snapshot)} / {material.item?.unit || "und"}</div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -624,7 +644,7 @@ function TaskRow({
     cancelada: "bg-neutral-50 border-neutral-200 opacity-70",
   };
   return (
-    <div id={`task-${task.id}`} className={cn("task-row grid gap-4 rounded-2xl border border-l-4 px-4 py-4 shadow-sm transition hover:shadow-md md:grid-cols-[1fr_auto] md:items-center", statusAccent[task.status], statusSurface[task.status], highlighted && "task-row--highlighted")}>
+    <div id={`task-${task.id}`} className={cn("task-row grid gap-3 rounded-2xl border border-l-4 px-3 py-3 shadow-sm transition hover:shadow-md sm:px-4 sm:py-4 md:grid-cols-[1fr_auto] md:items-center", statusAccent[task.status], statusSurface[task.status], highlighted && "task-row--highlighted")}>
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full bg-neutral-950 px-2.5 py-1 font-mono text-xs font-black text-white">TP-{String(task.task_number || 0).padStart(4, "0")}</span>
@@ -632,17 +652,17 @@ function TaskRow({
           <PriorityBadge priority={task.priority} />
           {task.cost_center_code ? <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-bold text-neutral-600">{task.cost_center_code}</span> : null}
         </div>
-        <div className="mt-3 text-lg font-black leading-tight text-neutral-950">{task.title}</div>
-        <div className="mt-3 grid gap-2 text-xs text-neutral-600 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <div className="mt-2 text-lg font-black leading-tight text-neutral-950">{task.title}</div>
+        <div className="task-row__facts mt-2 grid grid-cols-2 gap-2 text-xs text-neutral-600 lg:grid-cols-3 xl:grid-cols-5">
           <TaskFact label="Creada por" value={createdByLabel(task.created_by)} />
           <TaskFact label="Responsable" value={task.assigned_to || "Sin responsable"} />
-          <TaskFact label="Proceso" value={task.process_type} />
+          <TaskFact label="Proceso" value={task.process_type} wideOnMobile />
           <TaskFact label="Cantidad" value={`${formatQuantity(task.planned_quantity)} und`} />
           <TaskFact label="Tiempo aprox." value={formatEstimatedHours(task.estimated_minutes)} />
         </div>
         {task.notes ? <p className="mt-2 line-clamp-2 text-xs text-neutral-500">{task.notes}</p> : null}
       </div>
-      <div className="flex flex-wrap gap-2 md:min-w-[210px] md:justify-end">
+      <div className="task-row__actions grid grid-cols-2 gap-2 md:min-w-[210px] md:flex md:flex-wrap md:justify-end">
         {onConsume && !["revisada", "cancelada"].includes(task.status) ? (
           <button type="button" className="btn-quiet h-11 px-3 text-sm" disabled={pending} onClick={onConsume}>
             + Consumo
@@ -673,9 +693,9 @@ function TaskRow({
   );
 }
 
-function TaskFact({ label, value }: { label: string; value: string }) {
+function TaskFact({ label, value, wideOnMobile }: { label: string; value: string; wideOnMobile?: boolean }) {
   return (
-    <div className="rounded-xl bg-neutral-50 px-3 py-2">
+    <div className={cn("rounded-xl bg-white/75 px-2.5 py-2", wideOnMobile && "col-span-2 lg:col-span-1")}>
       <div className="text-[10px] font-black uppercase tracking-wide text-neutral-400">{label}</div>
       <div className="truncate text-sm font-bold text-neutral-800">{value}</div>
     </div>

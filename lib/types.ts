@@ -76,6 +76,7 @@ export type ProductionTaskMaterial = {
   created_at: string;
   updated_at: string;
   item?: InventoryItem | null;
+  task?: ProductionTask | null;
 };
 
 export type InventoryMovement = {
