@@ -961,13 +961,13 @@ function TaskCreateForm({
   onSubmit: (submission: TaskCreateSubmission) => void;
   onCancel: () => void;
 }) {
-  const employeeOptions = useMemo(() => productionEmployeeOptions(employees), [employees]);
   const assignableEmployees = useMemo(
     () => employees
       .filter((employee) => employee.roles.some((role) => ["operario", "ingeniero"].includes(role)))
       .sort((a, b) => a.name.localeCompare(b.name)),
     [employees],
   );
+  const [mainEmployeeIds, setMainEmployeeIds] = useState<string[]>([]);
   const [taskFiles, setTaskFiles] = useState<File[]>([]);
   const [subtasks, setSubtasks] = useState<DraftSubtask[]>([]);
   const [fileError, setFileError] = useState("");
@@ -975,7 +975,9 @@ function TaskCreateForm({
   const wizard = useFormWizard(steps.length);
 
   const selectedCostCenter = costCenters.find((costCenter) => costCenter.code === wizard.review.cost_center_code);
-  const selectedEmployee = employeeOptions.find(([value]) => value === wizard.review.assigned_to)?.[1];
+  const selectedEmployeeNames = mainEmployeeIds
+    .map((employeeId) => assignableEmployees.find((employee) => employee.id === employeeId)?.name)
+    .filter((name): name is string => Boolean(name));
   const selectedPriority = priorityLabels[(wizard.review.priority || "media") as ProductionTaskPriority];
   const totalFiles = taskFiles.length + subtasks.reduce((sum, subtask) => sum + subtask.files.length, 0);
 
@@ -1033,7 +1035,7 @@ function TaskCreateForm({
             title: textValue(formData, "title"),
             process_type: textValue(formData, "process_type"),
             cost_center_code: textValue(formData, "cost_center_code"),
-            assigned_to: textValue(formData, "assigned_to"),
+            assigned_to: selectedEmployeeNames.join(", "),
             priority: textValue(formData, "priority") as ProductionTaskPriority,
             estimated_minutes: numberValue(formData, "estimated_hours") * 60,
             notes: textValue(formData, "notes"),
@@ -1062,9 +1064,14 @@ function TaskCreateForm({
       </section>
 
       <section className="task-wizard__step" data-wizard-step="1" hidden={wizard.step !== 1}>
-        <WizardHeading eyebrow="Paso 2 de 5" title="¿Para quién y quién la coordina?" detail="Busca el centro de costo y asigna el responsable general de la tarea." />
+        <WizardHeading eyebrow="Paso 2 de 5" title="¿Para quién y quiénes son responsables?" detail="Busca el centro de costo y selecciona uno o varios operarios o ingenieros." />
         <ComboboxField name="cost_center_code" label="Centro de costo" options={costCenters.map((costCenter) => [costCenter.code, costCenterLabel(costCenter)])} placeholder="Escribe codigo, cliente o nombre..." />
-        <SelectField name="assigned_to" label="Responsable general" options={employeeOptions} blank={employeeOptions.length ? "Selecciona empleado" : "Sin empleados disponibles"} />
+        <EmployeeMultiSelect
+          label="Responsables de la tarea (puedes escoger varios)"
+          employees={assignableEmployees}
+          value={mainEmployeeIds}
+          onChange={setMainEmployeeIds}
+        />
       </section>
 
       <section className="task-wizard__step" data-wizard-step="2" hidden={wizard.step !== 2}>
@@ -1099,29 +1106,12 @@ function TaskCreateForm({
                       />
                     </label>
                   </div>
-                  <div>
-                    <span className="label">Operarios responsables (puedes escoger varios)</span>
-                    <div className="employee-check-grid">
-                      {assignableEmployees.map((employee) => {
-                        const checked = subtask.employeeIds.includes(employee.id);
-                        return (
-                          <label key={employee.id} className={cn("employee-check", checked && "is-selected")}>
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => updateSubtask(subtask.id, {
-                                employeeIds: checked
-                                  ? subtask.employeeIds.filter((employeeId) => employeeId !== employee.id)
-                                  : [...subtask.employeeIds, employee.id],
-                              })}
-                            />
-                            <span>{employee.name}</span>
-                          </label>
-                        );
-                      })}
-                      {!assignableEmployees.length ? <small>No hay operarios o ingenieros disponibles.</small> : null}
-                    </div>
-                  </div>
+                  <EmployeeMultiSelect
+                    label="Responsables de esta subtarea (puedes escoger varios)"
+                    employees={assignableEmployees}
+                    value={subtask.employeeIds}
+                    onChange={(employeeIds) => updateSubtask(subtask.id, { employeeIds })}
+                  />
                   <AttachmentPicker
                     label="Adjuntos de esta subtarea (opcional)"
                     detail="Solo los archivos necesarios para este paso."
@@ -1171,7 +1161,7 @@ function TaskCreateForm({
             <small>{wizard.review.process_type || "Sin proceso"}</small>
           </div>
           <ReviewItem label="Centro de costo" value={selectedCostCenter ? costCenterLabel(selectedCostCenter) : "Sin centro de costo"} />
-          <ReviewItem label="Responsable" value={selectedEmployee || "Sin responsable"} />
+          <ReviewItem label="Responsables" value={selectedEmployeeNames.join(", ") || "Sin responsables"} />
           <ReviewItem label="Prioridad" value={selectedPriority || "Media"} />
           <ReviewItem label="Tiempo aproximado" value={wizard.review.estimated_hours ? `${wizard.review.estimated_hours} h` : "Sin estimar"} />
           <ReviewItem label="Subtareas" value={subtasks.length ? `${subtasks.length} agregada${subtasks.length === 1 ? "" : "s"}` : "Sin subtareas"} />
@@ -1249,6 +1239,47 @@ function AttachmentPicker({
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function EmployeeMultiSelect({
+  label,
+  employees,
+  value,
+  onChange,
+}: {
+  label: string;
+  employees: ProductionEmployeeOption[];
+  value: string[];
+  onChange: (employeeIds: string[]) => void;
+}) {
+  return (
+    <div className="employee-multi-select">
+      <div className="employee-multi-select__heading">
+        <span className="label">{label}</span>
+        <small>{value.length ? `${value.length} seleccionado${value.length === 1 ? "" : "s"}` : "Selección opcional"}</small>
+      </div>
+      <div className="employee-check-grid">
+        {employees.map((employee) => {
+          const checked = value.includes(employee.id);
+          return (
+            <label key={employee.id} className={cn("employee-check", checked && "is-selected")}>
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => onChange(
+                  checked
+                    ? value.filter((employeeId) => employeeId !== employee.id)
+                    : [...value, employee.id],
+                )}
+              />
+              <span>{employee.name}</span>
+            </label>
+          );
+        })}
+        {!employees.length ? <small>No hay operarios o ingenieros disponibles.</small> : null}
+      </div>
     </div>
   );
 }
@@ -2038,36 +2069,6 @@ function SelectField({
       </select>
     </label>
   );
-}
-
-function productionEmployeeOptions(employees: ProductionEmployeeOption[]): Array<[string, string]> {
-  const roleOrder = ["operario", "ingeniero"];
-  return [...employees]
-    .map((employee) => ({
-      ...employee,
-      roles: employee.roles.filter((role) => roleOrder.includes(role)),
-    }))
-    .filter((employee) => employee.roles.length > 0)
-    .sort((a, b) => {
-      const aRank = Math.min(...a.roles.map((role) => roleOrder.indexOf(role)).filter((rank) => rank >= 0));
-      const bRank = Math.min(...b.roles.map((role) => roleOrder.indexOf(role)).filter((rank) => rank >= 0));
-      return (Number.isFinite(aRank) ? aRank : 99) - (Number.isFinite(bRank) ? bRank : 99) || a.name.localeCompare(b.name);
-    })
-    .map((employee) => [
-      employee.name,
-      `${employee.name} - ${employee.roles.map(productionRoleLabel).join(", ")}`,
-    ]);
-}
-
-function productionRoleLabel(role: string): string {
-  const labels: Record<string, string> = {
-    operario: "Operario",
-    ingeniero: "Ingeniero",
-    supervisor: "Supervisor",
-    logistica: "Logistica",
-    administrativo: "Administrativo",
-  };
-  return labels[role] ?? role;
 }
 
 function StatusBadge({ status }: { status: ProductionTaskStatus }) {

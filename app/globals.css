@@ -556,6 +556,10 @@ button { touch-action: manipulation; }
 .subtask-builder__header strong { color: #8E1557; font-size: 12px; }
 .subtask-builder__header button { border: 0; background: transparent; color: #dc2626; font-size: 10px; font-weight: 900; }
 .subtask-builder__fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.employee-multi-select { min-width: 0; border: 1px solid #e4e4e7; border-radius: 12px; background: #fafafa; padding: 9px; }
+.employee-multi-select__heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 5px; }
+.employee-multi-select__heading .label { margin: 0; }
+.employee-multi-select__heading small { flex: 0 0 auto; border-radius: 999px; background: #FCE4F0; padding: 4px 7px; color: #8E1557; font-size: 9px; font-weight: 900; }
 .employee-check-grid { display: flex; max-height: 105px; flex-wrap: wrap; gap: 5px; overflow: auto; padding: 2px 1px; }
 .employee-check { display: inline-flex; min-height: 32px; cursor: pointer; align-items: center; gap: 6px; border: 1px solid #e4e4e7; border-radius: 999px; background: #fafafa; padding: 4px 9px; color: #52525b; font-size: 10px; font-weight: 800; }
 .employee-check input { width: 14px; height: 14px; accent-color: #BE1E72; }
