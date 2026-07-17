@@ -1367,34 +1367,26 @@ function ConsumptionForm({
   onCancel: () => void;
 }) {
   const [taskId, setTaskId] = useState(defaultTaskId);
-  const [selectedItemId, setSelectedItemId] = useState("");
-  const [quantity, setQuantity] = useState("");
-  const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [rows, setRows] = useState<Array<{ itemId: string; quantity: number }>>([]);
   const selectedTask = tasks.find((task) => task.id === taskId);
-  const selectedItem = items.find((item) => item.id === selectedItemId);
   const fixedTask = Boolean(defaultTaskId);
-  const availableItems = items.filter((item) => !rows.some((row) => row.itemId === item.id));
+  const availableItems = items.filter((item) => item.stock > 0 && !rows.some((row) => row.itemId === item.id));
 
-  function addItem() {
+  function addItem(itemId: string) {
+    if (!itemId) return;
     setError("");
-    if (!selectedItem) {
-      setError("Busca y selecciona un material.");
+    const item = items.find((candidate) => candidate.id === itemId);
+    if (!item) {
+      setError("Ese material ya no está disponible.");
       return;
     }
-    const parsedQuantity = Number(quantity.replace(",", "."));
-    if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
-      setError("Escribe una cantidad consumida mayor a cero.");
+    if (item.stock <= 0) {
+      setError(`${item.name} no tiene existencias disponibles.`);
       return;
     }
-    if (parsedQuantity > selectedItem.stock) {
-      setError(`Disponible: ${formatQuantity(selectedItem.stock)} ${selectedItem.unit}.`);
-      return;
-    }
-    setRows((current) => [...current, { itemId: selectedItem.id, quantity: parsedQuantity }]);
-    setSelectedItemId("");
-    setQuantity("");
+    setRows((current) => [...current, { itemId: item.id, quantity: Math.min(1, item.stock) }]);
+    window.setTimeout(() => document.getElementById(`consumption-quantity-${item.id}`)?.focus(), 0);
   }
 
   return (
@@ -1427,17 +1419,11 @@ function ConsumptionForm({
         onSubmit({
           task_id: taskId,
           items: rows.map((row) => ({ item_id: row.itemId, quantity: row.quantity })),
-          notes,
+          notes: null,
         });
       }}
     >
-      {fixedTask ? (
-        <div className="consumption-task-lock">
-          <span>Tarea seleccionada</span>
-          <strong>{selectedTask ? taskLabel(selectedTask) : "Tarea de producción"}</strong>
-          <small>No necesitas elegirla de nuevo.</small>
-        </div>
-      ) : (
+      {!fixedTask ? (
         <label className="block">
           <span className="label">Tarea de producción</span>
           <select value={taskId} onChange={(event) => setTaskId(event.target.value)} className="input" required>
@@ -1445,38 +1431,20 @@ function ConsumptionForm({
             {tasks.map((task) => <option key={task.id} value={task.id}>{taskLabel(task)}</option>)}
           </select>
         </label>
-      )}
+      ) : null}
 
-      <div className="consumption-composer">
-        <div className="consumption-composer__item">
-          <span className="label">Buscar material</span>
-          <InventoryItemPicker items={availableItems} value={selectedItemId} onChange={setSelectedItemId} />
-        </div>
-        <label className="consumption-composer__quantity">
-          <span className="label">Cantidad consumida</span>
-          <div className="consumption-quantity-control">
-            <input
-              type="number"
-              min="0.001"
-              step="0.001"
-              inputMode="decimal"
-              value={quantity}
-              onChange={(event) => setQuantity(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  addItem();
-                }
-              }}
-              placeholder="0"
-            />
-            <b>{selectedItem?.unit || "und"}</b>
+      <div className="consumption-simple-search">
+        <div className="consumption-simple-search__heading">
+          <div>
+            <strong>Agregar materiales</strong>
+            <span>Busca y toca un ítem; se agregará directamente a la tabla.</span>
           </div>
-          <small>{selectedItem ? `Disponible: ${formatQuantity(selectedItem.stock)} ${selectedItem.unit}` : "La unidad aparece al seleccionar"}</small>
-        </label>
-        <button type="button" className="btn-primary consumption-composer__add" onClick={addItem} disabled={!selectedItemId}>
-          + Agregar
-        </button>
+          {fixedTask ? <small>{selectedTask ? taskLabel(selectedTask) : "Tarea seleccionada"}</small> : null}
+        </div>
+        <div>
+          <span className="label">Buscar material</span>
+          <InventoryItemPicker items={availableItems} value="" onChange={addItem} />
+        </div>
       </div>
 
       {error ? <div className="consumption-form__error" role="alert">{error}</div> : null}
@@ -1513,6 +1481,7 @@ function ConsumptionForm({
                       <td>
                         <div className="consumption-row-quantity">
                           <input
+                            id={`consumption-quantity-${item.id}`}
                             type="number"
                             min="0.001"
                             max={item.stock}
@@ -1539,14 +1508,9 @@ function ConsumptionForm({
             </table>
           </div>
         ) : (
-          <div className="consumption-draft__empty">Busca un material, escribe la cantidad y toca <strong>Agregar</strong>.</div>
+          <div className="consumption-draft__empty">Busca y toca un material para agregarlo aquí.</div>
         )}
       </div>
-
-      <label className="block">
-        <span className="label">Nota general opcional</span>
-        <input value={notes} onChange={(event) => setNotes(event.target.value)} className="input" placeholder="Corte, desperdicio o detalle especial..." />
-      </label>
 
       <div className="modal-actions consumption-form__actions">
         <button type="button" className="btn-secondary" disabled={pending} onClick={onCancel}>Cancelar</button>
