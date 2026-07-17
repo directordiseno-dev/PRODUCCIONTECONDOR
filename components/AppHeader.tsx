@@ -78,6 +78,8 @@ export function AppHeader({
             className="user-button"
             title={email}
             onClick={async () => {
+              const shouldSignOut = window.confirm("¿Seguro que quieres cerrar sesión?");
+              if (!shouldSignOut) return;
               await createClient().auth.signOut();
               router.replace("/login");
               router.refresh();
