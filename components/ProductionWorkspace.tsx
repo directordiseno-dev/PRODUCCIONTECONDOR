@@ -4,7 +4,7 @@ import { useEffect, useId, useMemo, useRef, useState, useTransition } from "reac
 import { useRouter } from "next/navigation";
 import { AppHeader } from "@/components/AppHeader";
 import {
-  consumeProductionMaterial,
+  consumeProductionMaterials,
   createInventoryItem,
   createInventoryMovement,
   createProductionTask,
@@ -227,14 +227,15 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
         />
       </WorkspaceModalPanel>
 
-      <WorkspaceModalPanel open={modal === "consumption"} title="Registrar consumo" detail="Descuenta material y lo carga a la tarea seleccionada." onClose={() => setModal(null)}>
+      <WorkspaceModalPanel open={modal === "consumption"} title="Registrar consumos" detail="Busca materiales, agrega cantidades y guárdalos juntos." onClose={() => setModal(null)} wide>
         <ConsumptionForm
+          key={consumptionTaskId || "consumo-manual"}
           tasks={activeTasks}
           items={data.items.filter((item) => item.active)}
           defaultTaskId={consumptionTaskId}
           pending={isPending}
           onCancel={() => setModal(null)}
-          onSubmit={(form) => runAction("Registrando consumo de material...", () => consumeProductionMaterial(form), "Consumo registrado.", () => { setModal(null); setConsumptionTaskId(""); setActiveTab("consumos"); })}
+          onSubmit={(form) => runAction("Registrando materiales consumidos...", () => consumeProductionMaterials(form), `${form.items.length} consumo${form.items.length === 1 ? "" : "s"} registrado${form.items.length === 1 ? "" : "s"}.`, () => { setModal(null); setConsumptionTaskId(""); setActiveTab("consumos"); })}
         />
       </WorkspaceModalPanel>
 
@@ -1030,70 +1031,299 @@ function ConsumptionForm({
   items: InventoryItem[];
   defaultTaskId: string;
   pending: boolean;
-  onSubmit: (input: Parameters<typeof consumeProductionMaterial>[0]) => void;
+  onSubmit: (input: Parameters<typeof consumeProductionMaterials>[0]) => void;
   onCancel: () => void;
 }) {
-  const steps = ["Tarea", "Material", "Cantidad", "Confirmar"];
-  const wizard = useFormWizard(steps.length);
-  const selectedTask = tasks.find((task) => task.id === wizard.review.task_id);
-  const selectedItem = items.find((item) => item.id === wizard.review.item_id);
+  const [taskId, setTaskId] = useState(defaultTaskId);
+  const [selectedItemId, setSelectedItemId] = useState("");
+  const [quantity, setQuantity] = useState("");
+  const [notes, setNotes] = useState("");
+  const [error, setError] = useState("");
+  const [rows, setRows] = useState<Array<{ itemId: string; quantity: number }>>([]);
+  const selectedTask = tasks.find((task) => task.id === taskId);
+  const selectedItem = items.find((item) => item.id === selectedItemId);
+  const fixedTask = Boolean(defaultTaskId);
+  const availableItems = items.filter((item) => !rows.some((row) => row.itemId === item.id));
+
+  function addItem() {
+    setError("");
+    if (!selectedItem) {
+      setError("Busca y selecciona un material.");
+      return;
+    }
+    const parsedQuantity = Number(quantity.replace(",", "."));
+    if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
+      setError("Escribe una cantidad consumida mayor a cero.");
+      return;
+    }
+    if (parsedQuantity > selectedItem.stock) {
+      setError(`Disponible: ${formatQuantity(selectedItem.stock)} ${selectedItem.unit}.`);
+      return;
+    }
+    setRows((current) => [...current, { itemId: selectedItem.id, quantity: parsedQuantity }]);
+    setSelectedItemId("");
+    setQuantity("");
+  }
 
   return (
     <form
-      ref={wizard.formRef}
-      className="modal-form task-wizard"
-      onKeyDown={wizard.handleKeyDown}
+      className="modal-form consumption-form"
       onSubmit={(event) => {
         event.preventDefault();
-        if (wizard.step < steps.length - 1) {
-          wizard.goNext();
+        setError("");
+        if (!taskId) {
+          setError("Selecciona la tarea a la que pertenecen los consumos.");
           return;
         }
-        const formData = new FormData(event.currentTarget);
+        if (!rows.length) {
+          setError("Agrega al menos un material a la tabla.");
+          return;
+        }
+        if (rows.some((row) => !Number.isFinite(row.quantity) || row.quantity <= 0)) {
+          setError("Revisa las cantidades de la tabla.");
+          return;
+        }
+        const rowWithoutStock = rows.find((row) => {
+          const item = items.find((candidate) => candidate.id === row.itemId);
+          return !item || row.quantity > item.stock;
+        });
+        if (rowWithoutStock) {
+          const item = items.find((candidate) => candidate.id === rowWithoutStock.itemId);
+          setError(item ? `No hay stock suficiente de ${item.name}. Disponible: ${formatQuantity(item.stock)} ${item.unit}.` : "Uno de los materiales ya no está disponible.");
+          return;
+        }
         onSubmit({
-          task_id: textValue(formData, "task_id"),
-          item_id: textValue(formData, "item_id"),
-          quantity: numberValue(formData, "quantity"),
-          notes: textValue(formData, "notes"),
+          task_id: taskId,
+          items: rows.map((row) => ({ item_id: row.itemId, quantity: row.quantity })),
+          notes,
         });
       }}
     >
-      <WizardProgress steps={steps} currentStep={wizard.step} />
-
-      <section className="task-wizard__step" data-wizard-step="0" hidden={wizard.step !== 0}>
-        <WizardHeading eyebrow="Paso 1 de 4" title="¿Que tarea uso el material?" detail="Selecciona el trabajo al que se cargara este consumo." />
-        <SelectField name="task_id" label="Tarea de produccion" options={tasks.map((task) => [task.id, taskLabel(task)])} blank="Selecciona la tarea..." defaultValue={defaultTaskId} required autoFocus />
-      </section>
-
-      <section className="task-wizard__step" data-wizard-step="1" hidden={wizard.step !== 1}>
-        <WizardHeading eyebrow="Paso 2 de 4" title="¿Que material se utilizo?" detail="Elige el item correcto y revisa la cantidad disponible." />
-        <SelectField name="item_id" label="Material utilizado" options={items.map((item) => [item.id, `${item.code} - ${item.name} · disponible ${formatQuantity(item.stock)} ${item.unit}`])} blank="Selecciona el material..." required />
-      </section>
-
-      <section className="task-wizard__step" data-wizard-step="2" hidden={wizard.step !== 2}>
-        <WizardHeading eyebrow="Paso 3 de 4" title="¿Cuanto se consumio?" detail="Indica la cantidad exacta y agrega una nota solamente si hace falta." />
-        <Field name="quantity" label="Cantidad utilizada" type="number" step="0.001" min="0.001" required placeholder="0" />
-        <Field name="notes" label="Nota opcional" placeholder="Corte, desperdicio, pieza usada..." />
-        <div className="modal-hint">El inventario se descontara al confirmar y el costo quedara asociado a la tarea.</div>
-      </section>
-
-      <section className="task-wizard__step" data-wizard-step="3" hidden={wizard.step !== 3}>
-        <WizardHeading eyebrow="Paso 4 de 4" title="Confirma el consumo" detail="Revisa el material y la cantidad antes de descontarlos del inventario." />
-        <div className="task-wizard__review">
-          <div className="task-wizard__review-main">
-            <span>Material</span>
-            <strong>{selectedItem ? `${selectedItem.code} - ${selectedItem.name}` : "Sin material"}</strong>
-            <small>{selectedItem ? `Disponible: ${formatQuantity(selectedItem.stock)} ${selectedItem.unit}` : ""}</small>
-          </div>
-          <ReviewItem label="Tarea" value={selectedTask ? taskLabel(selectedTask) : "Sin tarea"} />
-          <ReviewItem label="Cantidad" value={`${wizard.review.quantity || "0"} ${selectedItem?.unit || ""}`.trim()} />
-          <ReviewItem label="Resultado" value="Descontar inventario" />
-          {wizard.review.notes ? <div className="task-wizard__review-notes"><span>Nota</span><p>{wizard.review.notes}</p></div> : null}
+      {fixedTask ? (
+        <div className="consumption-task-lock">
+          <span>Tarea seleccionada</span>
+          <strong>{selectedTask ? taskLabel(selectedTask) : "Tarea de producción"}</strong>
+          <small>No necesitas elegirla de nuevo.</small>
         </div>
-      </section>
+      ) : (
+        <label className="block">
+          <span className="label">Tarea de producción</span>
+          <select value={taskId} onChange={(event) => setTaskId(event.target.value)} className="input" required>
+            <option value="">Selecciona la tarea...</option>
+            {tasks.map((task) => <option key={task.id} value={task.id}>{taskLabel(task)}</option>)}
+          </select>
+        </label>
+      )}
 
-      <WizardActions wizard={wizard} stepCount={steps.length} pending={pending} pendingLabel="Registrando..." submitLabel="Confirmar consumo" onCancel={onCancel} />
+      <div className="consumption-composer">
+        <div className="consumption-composer__item">
+          <span className="label">Buscar material</span>
+          <InventoryItemPicker items={availableItems} value={selectedItemId} onChange={setSelectedItemId} />
+        </div>
+        <label className="consumption-composer__quantity">
+          <span className="label">Cantidad consumida</span>
+          <div className="consumption-quantity-control">
+            <input
+              type="number"
+              min="0.001"
+              step="0.001"
+              inputMode="decimal"
+              value={quantity}
+              onChange={(event) => setQuantity(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  addItem();
+                }
+              }}
+              placeholder="0"
+            />
+            <b>{selectedItem?.unit || "und"}</b>
+          </div>
+          <small>{selectedItem ? `Disponible: ${formatQuantity(selectedItem.stock)} ${selectedItem.unit}` : "La unidad aparece al seleccionar"}</small>
+        </label>
+        <button type="button" className="btn-primary consumption-composer__add" onClick={addItem} disabled={!selectedItemId}>
+          + Agregar
+        </button>
+      </div>
+
+      {error ? <div className="consumption-form__error" role="alert">{error}</div> : null}
+
+      <div className="consumption-draft">
+        <div className="consumption-draft__heading">
+          <div>
+            <strong>Materiales a consumir</strong>
+            <span>Puedes corregir cantidades antes de guardar.</span>
+          </div>
+          <b>{rows.length}</b>
+        </div>
+        {rows.length ? (
+          <div className="consumption-draft__table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Material</th>
+                  <th>Cantidad consumida</th>
+                  <th>Disponible</th>
+                  <th><span className="sr-only">Quitar</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const item = items.find((candidate) => candidate.id === row.itemId);
+                  if (!item) return null;
+                  return (
+                    <tr key={row.itemId}>
+                      <td>
+                        <strong>{item.name}</strong>
+                        <span>{item.code}</span>
+                      </td>
+                      <td>
+                        <div className="consumption-row-quantity">
+                          <input
+                            type="number"
+                            min="0.001"
+                            max={item.stock}
+                            step="0.001"
+                            inputMode="decimal"
+                            value={row.quantity}
+                            onChange={(event) => {
+                              const nextQuantity = Number(event.target.value);
+                              setRows((current) => current.map((currentRow) => currentRow.itemId === row.itemId ? { ...currentRow, quantity: nextQuantity } : currentRow));
+                            }}
+                            aria-label={`Cantidad consumida de ${item.name}`}
+                          />
+                          <b>{item.unit}</b>
+                        </div>
+                      </td>
+                      <td>{formatQuantity(item.stock)} {item.unit}</td>
+                      <td>
+                        <button type="button" className="consumption-remove" onClick={() => setRows((current) => current.filter((currentRow) => currentRow.itemId !== row.itemId))} aria-label={`Quitar ${item.name}`}>×</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="consumption-draft__empty">Busca un material, escribe la cantidad y toca <strong>Agregar</strong>.</div>
+        )}
+      </div>
+
+      <label className="block">
+        <span className="label">Nota general opcional</span>
+        <input value={notes} onChange={(event) => setNotes(event.target.value)} className="input" placeholder="Corte, desperdicio o detalle especial..." />
+      </label>
+
+      <div className="modal-actions consumption-form__actions">
+        <button type="button" className="btn-secondary" disabled={pending} onClick={onCancel}>Cancelar</button>
+        <button type="submit" className="btn-primary" disabled={pending || !rows.length}>{pending ? "Guardando..." : `Guardar ${rows.length || ""} consumo${rows.length === 1 ? "" : "s"}`}</button>
+      </div>
     </form>
+  );
+}
+
+function InventoryItemPicker({
+  items,
+  value,
+  onChange,
+}: {
+  items: InventoryItem[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const inputId = useId();
+  const listboxId = `${inputId}-inventory-options`;
+  const selectedItem = items.find((item) => item.id === value);
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const normalizedQuery = normalizeSearchText(query);
+  const filteredItems = useMemo(() => {
+    const matches = normalizedQuery
+      ? items.filter((item) => normalizeSearchText(`${item.code} ${item.name} ${item.category} ${item.location || ""}`).includes(normalizedQuery))
+      : items;
+    return matches.slice(0, 12);
+  }, [items, normalizedQuery]);
+
+  useEffect(() => {
+    if (!value) setQuery("");
+    else if (selectedItem) setQuery(`${selectedItem.code} - ${selectedItem.name}`);
+  }, [selectedItem, value]);
+
+  function choose(item: InventoryItem) {
+    onChange(item.id);
+    setQuery(`${item.code} - ${item.name}`);
+    setOpen(false);
+    setActiveIndex(-1);
+  }
+
+  return (
+    <div
+      className="combobox-field consumption-item-picker"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+      }}
+    >
+      <div className="combobox-control">
+        <input
+          id={inputId}
+          type="search"
+          role="combobox"
+          aria-expanded={open}
+          aria-controls={listboxId}
+          aria-activedescendant={activeIndex >= 0 ? `${listboxId}-${activeIndex}` : undefined}
+          value={query}
+          placeholder="Escribe código o nombre..."
+          className="input combobox-input"
+          autoComplete="off"
+          onFocus={() => setOpen(true)}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            onChange("");
+            setOpen(true);
+            setActiveIndex(-1);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowDown") {
+              event.preventDefault();
+              setOpen(true);
+              setActiveIndex((current) => Math.min(filteredItems.length - 1, current + 1));
+            } else if (event.key === "ArrowUp") {
+              event.preventDefault();
+              setActiveIndex((current) => Math.max(0, current - 1));
+            } else if (event.key === "Enter" && open && filteredItems.length) {
+              event.preventDefault();
+              choose(filteredItems[activeIndex >= 0 ? activeIndex : 0]);
+            } else if (event.key === "Escape") {
+              setOpen(false);
+            }
+          }}
+        />
+        <button type="button" className="combobox-toggle" aria-label="Mostrar materiales" onMouseDown={(event) => event.preventDefault()} onClick={() => setOpen((current) => !current)}>▾</button>
+      </div>
+      {open ? (
+        <div id={listboxId} className="combobox-options" role="listbox">
+          {filteredItems.length ? filteredItems.map((item, index) => (
+            <button
+              key={item.id}
+              id={`${listboxId}-${index}`}
+              type="button"
+              role="option"
+              aria-selected={value === item.id}
+              className={cn(activeIndex === index && "is-active")}
+              onMouseDown={(event) => event.preventDefault()}
+              onMouseEnter={() => setActiveIndex(index)}
+              onClick={() => choose(item)}
+            >
+              <strong>{item.code}</strong>
+              <span>{item.name} · {formatQuantity(item.stock)} {item.unit}</span>
+            </button>
+          )) : <div className="combobox-empty">No hay materiales que coincidan.</div>}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

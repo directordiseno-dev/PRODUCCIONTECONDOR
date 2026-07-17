@@ -9,6 +9,7 @@ import type {
   InventoryMovement,
   InventoryMovementInput,
   ProductionMaterialConsumptionInput,
+  ProductionMaterialBatchConsumptionInput,
   ProductionEmployeeOption,
   ProductionEmployeeRole,
   ProductionTask,
@@ -206,13 +207,28 @@ export async function updateProductionTaskStatus(id: string, status: ProductionT
 }
 
 export async function consumeProductionMaterial(input: ProductionMaterialConsumptionInput): Promise<string> {
+  const movementIds = await consumeProductionMaterials({
+    task_id: input.task_id,
+    items: [{ item_id: input.item_id, quantity: input.quantity }],
+    notes: input.notes,
+  });
+  return movementIds[0];
+}
+
+export async function consumeProductionMaterials(input: ProductionMaterialBatchConsumptionInput): Promise<string[]> {
   const supabase = await createClient();
   const taskId = clean(input.task_id);
-  const itemId = clean(input.item_id);
-  const quantity = positiveNumber(input.quantity);
   if (!taskId) throw new Error("Selecciona la tarea.");
-  if (!itemId) throw new Error("Selecciona el item de inventario.");
-  if (quantity <= 0) throw new Error("La cantidad consumida debe ser mayor a cero.");
+
+  const groupedItems = new Map<string, number>();
+  for (const row of input.items.slice(0, 50)) {
+    const itemId = clean(row.item_id);
+    const quantity = positiveNumber(row.quantity);
+    if (!itemId || quantity <= 0) continue;
+    groupedItems.set(itemId, roundQuantity((groupedItems.get(itemId) ?? 0) + quantity));
+  }
+  const rows = Array.from(groupedItems, ([item_id, quantity]) => ({ item_id, quantity }));
+  if (!rows.length) throw new Error("Agrega al menos un material con una cantidad mayor a cero.");
 
   const { data: task, error: taskError } = await supabase
     .from("production_tasks")
@@ -221,6 +237,55 @@ export async function consumeProductionMaterial(input: ProductionMaterialConsump
     .single();
   if (taskError || !task) throwSupabaseError("cargar tarea para consumo", taskError ?? {});
 
+  const { data: stockItems, error: stockError } = await supabase
+    .from("inventory_items")
+    .select("*")
+    .in("id", rows.map((row) => row.item_id));
+  if (stockError) throwSupabaseError("validar materiales de inventario", stockError);
+
+  const inventoryById = new Map((stockItems ?? []).map((item) => [String(item.id), item as InventoryItem]));
+  for (const row of rows) {
+    const item = inventoryById.get(row.item_id);
+    if (!item) throw new Error("Uno de los materiales ya no existe en inventario.");
+    if (!item.active) throw new Error(`${item.name} está inactivo y no se puede consumir.`);
+    if (row.quantity > Number(item.stock || 0)) {
+      throw new Error(`No hay stock suficiente de ${item.name}. Disponible: ${Number(item.stock || 0)} ${item.unit || "und"}.`);
+    }
+  }
+
+  const notes = cleanNullable(input.notes);
+  const movementIds: string[] = [];
+  for (const row of rows) {
+    const item = inventoryById.get(row.item_id) as InventoryItem;
+    movementIds.push(await recordProductionMaterialConsumption(
+      supabase,
+      task as ProductionTask,
+      item,
+      row.quantity,
+      notes,
+    ));
+  }
+
+  await insertTaskEvent(
+    supabase,
+    taskId,
+    "consumo_material",
+    notes || `${rows.length} material${rows.length === 1 ? "" : "es"} registrado${rows.length === 1 ? "" : "s"}`,
+    await currentUserEmail(supabase),
+  );
+  revalidatePath("/");
+  return movementIds;
+}
+
+async function recordProductionMaterialConsumption(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  task: ProductionTask,
+  item: InventoryItem,
+  quantity: number,
+  notes: string | null,
+): Promise<string> {
+  const taskId = clean(task.id);
+  const itemId = clean(item.id);
   const movementId = await createInventoryMovementInternal(
     supabase,
     {
@@ -231,18 +296,11 @@ export async function consumeProductionMaterial(input: ProductionMaterialConsump
       production_task_id: taskId,
       source_type: "produccion",
       source_id: taskId,
-      notes: cleanNullable(input.notes) || `Consumo tarea #${task.task_number ?? ""}`,
+      notes: notes || `Consumo tarea #${task.task_number ?? ""}`,
       movement_date: todayInputValue(),
     },
     false,
   );
-
-  const { data: item, error: itemError } = await supabase
-    .from("inventory_items")
-    .select("average_cost")
-    .eq("id", itemId)
-    .single();
-  if (itemError) throwSupabaseError("leer costo del item consumido", itemError);
 
   const { data: existing, error: existingError } = await supabase
     .from("production_task_materials")
@@ -258,7 +316,7 @@ export async function consumeProductionMaterial(input: ProductionMaterialConsump
       .update({
         consumed_quantity: roundQuantity(Number(existing.consumed_quantity || 0) + quantity),
         unit_cost_snapshot: Number(item.average_cost || 0),
-        notes: cleanNullable(input.notes) ?? existing.notes,
+        notes: notes ?? existing.notes,
         updated_at: new Date().toISOString(),
       })
       .eq("id", existing.id);
@@ -270,13 +328,11 @@ export async function consumeProductionMaterial(input: ProductionMaterialConsump
       planned_quantity: 0,
       consumed_quantity: quantity,
       unit_cost_snapshot: Number(item.average_cost || 0),
-      notes: cleanNullable(input.notes),
+      notes,
     });
     if (error) throwSupabaseError("guardar consumo de material", error);
   }
 
-  await insertTaskEvent(supabase, taskId, "consumo_material", cleanNullable(input.notes), await currentUserEmail(supabase));
-  revalidatePath("/");
   return movementId;
 }
 

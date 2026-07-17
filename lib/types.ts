@@ -154,3 +154,12 @@ export type ProductionMaterialConsumptionInput = {
   quantity: number;
   notes?: string | null;
 };
+
+export type ProductionMaterialBatchConsumptionInput = {
+  task_id: string;
+  items: Array<{
+    item_id: string;
+    quantity: number;
+  }>;
+  notes?: string | null;
+};
