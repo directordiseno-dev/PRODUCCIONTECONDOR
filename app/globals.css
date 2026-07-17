@@ -46,6 +46,9 @@ button { touch-action: manipulation; }
   .btn-quiet {
     @apply btn border border-tecondor-magenta/15 bg-tecondor-magenta/5 text-tecondor-magentaDark hover:bg-tecondor-magentaLight;
   }
+  .btn-danger {
+    @apply btn border border-red-200 bg-white text-red-700 shadow-sm hover:border-red-300 hover:bg-red-50;
+  }
   .input {
     @apply w-full min-h-11 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-base shadow-sm placeholder:text-neutral-400
       focus:border-tecondor-magenta focus:outline-none focus:ring-2 focus:ring-tecondor-magenta/15;

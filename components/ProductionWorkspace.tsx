@@ -212,6 +212,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
               onConsumeTask={openConsumption}
               onStatus={(task, status) => runAction("Actualizando tarea...", () => updateProductionTaskStatus(task.id, status), "Tarea actualizada.")}
               onSubtaskStatus={(subtask, status) => runAction("Actualizando subtarea...", () => updateProductionSubtaskStatus(subtask.id, status), "Subtarea actualizada.")}
+              onDelete={(task) => runAction("Eliminando tarea...", () => updateProductionTaskStatus(task.id, "cancelada", "Tarea eliminada del tablero"), "Tarea eliminada.")}
             />
           ) : null}
 
@@ -511,6 +512,7 @@ function TasksTab({
   onConsumeTask,
   onStatus,
   onSubtaskStatus,
+  onDelete,
 }: {
   tasks: ProductionTask[];
   pending: boolean;
@@ -520,6 +522,7 @@ function TasksTab({
   onConsumeTask: (taskId?: string) => void;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
   onSubtaskStatus: (subtask: ProductionSubtask, status: ProductionTaskStatus) => void;
+  onDelete: (task: ProductionTask) => void;
 }) {
   const [filter, setFilter] = useState<"todas" | "activas" | "mias" | ProductionTaskStatus>("todas");
   const filteredTasks = filter === "todas"
@@ -577,6 +580,7 @@ function TasksTab({
               highlighted={task.id === highlightedTaskId}
               onStatus={onStatus}
               onSubtaskStatus={onSubtaskStatus}
+              onDelete={onDelete}
               onConsume={() => onConsumeTask(task.id)}
             />
           ))}
@@ -653,6 +657,7 @@ function TaskRow({
   highlighted,
   onStatus,
   onSubtaskStatus = () => undefined,
+  onDelete,
   onConsume,
 }: {
   task: ProductionTask;
@@ -660,6 +665,7 @@ function TaskRow({
   highlighted?: boolean;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
   onSubtaskStatus?: (subtask: ProductionSubtask, status: ProductionTaskStatus) => void;
+  onDelete?: (task: ProductionTask) => void;
   onConsume?: () => void;
 }) {
   const statusAccent: Record<ProductionTaskStatus, string> = {
@@ -743,6 +749,18 @@ function TaskRow({
         {task.status === "terminada" ? (
           <button type="button" className="btn-primary h-11 px-4 text-sm" disabled={pending} onClick={() => onStatus(task, "revisada")}>
             Revisar
+          </button>
+        ) : null}
+        {onDelete ? (
+          <button
+            type="button"
+            className="btn-danger h-11 px-3 text-sm"
+            disabled={pending}
+            onClick={() => {
+              if (window.confirm(`¿Eliminar la tarea TP-${String(task.task_number || 0).padStart(4, "0")} · ${task.title}?`)) onDelete(task);
+            }}
+          >
+            Eliminar
           </button>
         ) : null}
       </div>
