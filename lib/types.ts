@@ -26,6 +26,40 @@ export type ProductionTaskPriority = "baja" | "media" | "alta" | "urgente";
 export type ProductionEmployeeRole = "operario" | "ingeniero" | "supervisor" | "logistica" | "administrativo";
 export type ProductionTaskStatus = "pendiente" | "en_proceso" | "pausada" | "bloqueada" | "terminada" | "revisada" | "cancelada";
 
+export type ProductionTaskAttachment = {
+  id: string;
+  task_id: string;
+  subtask_id: string | null;
+  bucket_path: string;
+  file_name: string;
+  content_type: string | null;
+  size_bytes: number;
+  uploaded_by: string | null;
+  created_at: string;
+  url?: string | null;
+};
+
+export type ProductionSubtaskAssignment = {
+  id: string;
+  subtask_id: string;
+  employee_id: string;
+  employee_name: string;
+  created_at: string;
+};
+
+export type ProductionSubtask = {
+  id: string;
+  task_id: string;
+  position: number;
+  title: string;
+  notes: string | null;
+  status: ProductionTaskStatus;
+  created_at: string;
+  updated_at: string;
+  assignments: ProductionSubtaskAssignment[];
+  attachments: ProductionTaskAttachment[];
+};
+
 export type InventoryItem = {
   id: string;
   code: string;
@@ -63,6 +97,8 @@ export type ProductionTask = {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  subtasks: ProductionSubtask[];
+  attachments: ProductionTaskAttachment[];
 };
 
 export type ProductionTaskMaterial = {
@@ -102,6 +138,7 @@ export type ProductionEmployeeOption = { id: string; name: string; roles: Produc
 
 export type ProductionWorkspaceData = {
   schemaReady: boolean;
+  taskExtensionsReady: boolean;
   message?: string;
   items: InventoryItem[];
   tasks: ProductionTask[];
@@ -146,6 +183,25 @@ export type ProductionTaskInput = {
   planned_quantity?: number;
   estimated_minutes?: number;
   notes?: string | null;
+  attachments?: ProductionTaskAttachmentInput[];
+  subtasks?: ProductionSubtaskInput[];
+};
+
+export type ProductionTaskAttachmentInput = {
+  bucket_path: string;
+  file_name: string;
+  content_type?: string | null;
+  size_bytes?: number;
+};
+
+export type ProductionSubtaskInput = {
+  title: string;
+  notes?: string | null;
+  assigned_to?: Array<{
+    employee_id: string;
+    employee_name: string;
+  }>;
+  attachments?: ProductionTaskAttachmentInput[];
 };
 
 export type ProductionMaterialConsumptionInput = {

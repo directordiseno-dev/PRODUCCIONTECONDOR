@@ -8,9 +8,11 @@ import {
   createInventoryItem,
   createInventoryMovement,
   createProductionTask,
+  updateProductionSubtaskStatus,
   updateProductionTaskStatus,
 } from "@/app/actions/produccion";
 import { formatCOP, formatDateShort, formatQuantity } from "@/lib/formatters";
+import { createClient as createBrowserClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import type {
   CostCenterOption,
@@ -22,6 +24,8 @@ import type {
   ProductionTaskMaterial,
   ProductionTaskPriority,
   ProductionTaskStatus,
+  ProductionSubtask,
+  ProductionSubtaskInput,
   ProductionWorkspaceData,
   Supplier,
 } from "@/lib/types";
@@ -29,6 +33,19 @@ import type {
 type Tab = "tareas" | "inventario" | "consumos";
 type WorkspaceModal = "task" | "consumption" | "item" | "movement" | null;
 type Feedback = { type: "success" | "error" | "info"; text: string } | null;
+type DraftSubtask = {
+  id: string;
+  title: string;
+  notes: string;
+  employeeIds: string[];
+  files: File[];
+};
+type TaskCreateSubmission = {
+  input: Parameters<typeof createProductionTask>[0];
+  taskFiles: File[];
+  subtaskFiles: File[][];
+  fileCount: number;
+};
 
 const processOptions = [
   "Soldadura",
@@ -194,6 +211,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
               highlightedTaskId={highlightedTaskId}
               onConsumeTask={openConsumption}
               onStatus={(task, status) => runAction("Actualizando tarea...", () => updateProductionTaskStatus(task.id, status), "Tarea actualizada.")}
+              onSubtaskStatus={(subtask, status) => runAction("Actualizando subtarea...", () => updateProductionSubtaskStatus(subtask.id, status), "Subtarea actualizada.")}
             />
           ) : null}
 
@@ -221,9 +239,15 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
         <TaskCreateForm
           costCenters={data.cost_centers}
           employees={data.employees}
+          extensionsReady={data.taskExtensionsReady}
           pending={isPending}
           onCancel={() => setModal(null)}
-          onSubmit={(form) => runAction("Creando tarea de produccion...", () => createProductionTask(form), "Tarea creada.", () => { setModal(null); setActiveTab("tareas"); })}
+          onSubmit={(submission) => runAction(
+            submission.fileCount ? "Subiendo adjuntos y creando tarea..." : "Creando tarea de produccion...",
+            () => createProductionTaskWithUploads(submission),
+            "Tarea creada.",
+            () => { setModal(null); setActiveTab("tareas"); },
+          )}
         />
       </WorkspaceModalPanel>
 
@@ -486,6 +510,7 @@ function TasksTab({
   highlightedTaskId,
   onConsumeTask,
   onStatus,
+  onSubtaskStatus,
 }: {
   tasks: ProductionTask[];
   pending: boolean;
@@ -494,6 +519,7 @@ function TasksTab({
   highlightedTaskId: string;
   onConsumeTask: (taskId?: string) => void;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
+  onSubtaskStatus: (subtask: ProductionSubtask, status: ProductionTaskStatus) => void;
 }) {
   const [filter, setFilter] = useState<"todas" | "activas" | "mias" | ProductionTaskStatus>("todas");
   const filteredTasks = filter === "todas"
@@ -544,7 +570,15 @@ function TasksTab({
       <Panel title="Tareas de planta" detail="Inicia, pausa, termina o registra material desde la misma fila.">
         <div className="workspace-list divide-y divide-neutral-100">
           {filteredTasks.map((task) => (
-            <TaskRow key={task.id} task={task} pending={pending} highlighted={task.id === highlightedTaskId} onStatus={onStatus} onConsume={() => onConsumeTask(task.id)} />
+            <TaskRow
+              key={task.id}
+              task={task}
+              pending={pending}
+              highlighted={task.id === highlightedTaskId}
+              onStatus={onStatus}
+              onSubtaskStatus={onSubtaskStatus}
+              onConsume={() => onConsumeTask(task.id)}
+            />
           ))}
           {!filteredTasks.length ? <EmptyState title="No hay tareas en esta vista" detail="Cambia el filtro o crea una nueva tarea de produccion." /> : null}
         </div>
@@ -618,12 +652,14 @@ function TaskRow({
   pending,
   highlighted,
   onStatus,
+  onSubtaskStatus = () => undefined,
   onConsume,
 }: {
   task: ProductionTask;
   pending: boolean;
   highlighted?: boolean;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
+  onSubtaskStatus?: (subtask: ProductionSubtask, status: ProductionTaskStatus) => void;
   onConsume?: () => void;
 }) {
   const statusAccent: Record<ProductionTaskStatus, string> = {
@@ -654,14 +690,34 @@ function TaskRow({
           {task.cost_center_code ? <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-bold text-neutral-600">{task.cost_center_code}</span> : null}
         </div>
         <div className="mt-2 text-lg font-black leading-tight text-neutral-950">{task.title}</div>
-        <div className="task-row__facts mt-2 grid grid-cols-2 gap-2 text-xs text-neutral-600 lg:grid-cols-3 xl:grid-cols-5">
+        <div className="task-row__facts mt-2 grid grid-cols-2 gap-2 text-xs text-neutral-600 lg:grid-cols-4">
           <TaskFact label="Creada por" value={createdByLabel(task.created_by)} />
           <TaskFact label="Responsable" value={task.assigned_to || "Sin responsable"} />
           <TaskFact label="Proceso" value={task.process_type} wideOnMobile />
-          <TaskFact label="Cantidad" value={`${formatQuantity(task.planned_quantity)} und`} />
           <TaskFact label="Tiempo aprox." value={formatEstimatedHours(task.estimated_minutes)} />
         </div>
         {task.notes ? <p className="mt-2 line-clamp-2 text-xs text-neutral-500">{task.notes}</p> : null}
+        {task.attachments.length ? (
+          <AttachmentLinks attachments={task.attachments} className="task-row__attachments" />
+        ) : null}
+        {task.subtasks.length ? (
+          <details className="task-subtasks">
+            <summary>
+              <span>{task.subtasks.length} subtarea{task.subtasks.length === 1 ? "" : "s"}</span>
+              <small>{task.subtasks.filter((subtask) => subtask.status === "terminada").length} terminadas</small>
+            </summary>
+            <div className="task-subtasks__list">
+              {task.subtasks.map((subtask) => (
+                <SubtaskRow
+                  key={subtask.id}
+                  subtask={subtask}
+                  pending={pending}
+                  onStatus={(status) => onSubtaskStatus(subtask, status)}
+                />
+              ))}
+            </div>
+          </details>
+        ) : null}
       </div>
       <div className="task-row__actions grid grid-cols-2 gap-2 md:min-w-[210px] md:flex md:flex-wrap md:justify-end">
         {onConsume && !["revisada", "cancelada"].includes(task.status) ? (
@@ -669,12 +725,12 @@ function TaskRow({
             + Consumo
           </button>
         ) : null}
-        {task.status === "pendiente" || task.status === "pausada" ? (
+        {!task.subtasks.length && (task.status === "pendiente" || task.status === "pausada") ? (
           <button type="button" className="btn-secondary h-11 px-4 text-sm" disabled={pending} onClick={() => onStatus(task, "en_proceso")}>
             Iniciar
           </button>
         ) : null}
-        {task.status === "en_proceso" ? (
+        {!task.subtasks.length && task.status === "en_proceso" ? (
           <>
             <button type="button" className="btn-secondary h-11 px-4 text-sm" disabled={pending} onClick={() => onStatus(task, "pausada")}>
               Pausar
@@ -690,6 +746,67 @@ function TaskRow({
           </button>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function SubtaskRow({
+  subtask,
+  pending,
+  onStatus,
+}: {
+  subtask: ProductionSubtask;
+  pending: boolean;
+  onStatus: (status: ProductionTaskStatus) => void;
+}) {
+  const responsibleNames = subtask.assignments.map((assignment) => assignment.employee_name);
+  return (
+    <div className={cn("subtask-row", `subtask-row--${subtask.status}`)}>
+      <div className="subtask-row__main">
+        <div className="subtask-row__title">
+          <StatusBadge status={subtask.status} />
+          <strong>{subtask.title}</strong>
+        </div>
+        <div className="subtask-row__people">
+          <span>Operarios</span>
+          <b>{responsibleNames.length ? responsibleNames.join(", ") : "Sin asignar"}</b>
+        </div>
+        {subtask.notes ? <p>{subtask.notes}</p> : null}
+        {subtask.attachments.length ? <AttachmentLinks attachments={subtask.attachments} /> : null}
+      </div>
+      <div className="subtask-row__actions">
+        {["pendiente", "pausada"].includes(subtask.status) ? (
+          <button type="button" className="btn-secondary" disabled={pending} onClick={() => onStatus("en_proceso")}>Iniciar</button>
+        ) : null}
+        {subtask.status === "en_proceso" ? (
+          <>
+            <button type="button" className="btn-secondary" disabled={pending} onClick={() => onStatus("pausada")}>Pausar</button>
+            <button type="button" className="btn-primary" disabled={pending} onClick={() => onStatus("terminada")}>Terminar</button>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function AttachmentLinks({
+  attachments,
+  className,
+}: {
+  attachments: ProductionTask["attachments"];
+  className?: string;
+}) {
+  return (
+    <div className={cn("attachment-links", className)}>
+      {attachments.map((attachment) => (
+        attachment.url ? (
+          <a key={attachment.id} href={attachment.url} target="_blank" rel="noreferrer" title={attachment.file_name}>
+            <span aria-hidden="true">↗</span>{attachment.file_name}
+          </a>
+        ) : (
+          <span key={attachment.id} className="attachment-links__unavailable">{attachment.file_name}</span>
+        )
+      ))}
     </div>
   );
 }
@@ -814,23 +931,64 @@ function WorkspaceModalPanel({
 function TaskCreateForm({
   costCenters,
   employees,
+  extensionsReady,
   pending,
   onSubmit,
   onCancel,
 }: {
   costCenters: CostCenterOption[];
   employees: ProductionEmployeeOption[];
+  extensionsReady: boolean;
   pending: boolean;
-  onSubmit: (input: Parameters<typeof createProductionTask>[0]) => void;
+  onSubmit: (submission: TaskCreateSubmission) => void;
   onCancel: () => void;
 }) {
   const employeeOptions = useMemo(() => productionEmployeeOptions(employees), [employees]);
-  const steps = ["Trabajo", "Asignacion", "Planeacion", "Confirmacion final"];
+  const assignableEmployees = useMemo(
+    () => employees
+      .filter((employee) => employee.roles.some((role) => ["operario", "ingeniero"].includes(role)))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+    [employees],
+  );
+  const [taskFiles, setTaskFiles] = useState<File[]>([]);
+  const [subtasks, setSubtasks] = useState<DraftSubtask[]>([]);
+  const [fileError, setFileError] = useState("");
+  const steps = ["Trabajo", "Asignacion", "Subtareas", "Planeacion", "Confirmacion"];
   const wizard = useFormWizard(steps.length);
 
   const selectedCostCenter = costCenters.find((costCenter) => costCenter.code === wizard.review.cost_center_code);
   const selectedEmployee = employeeOptions.find(([value]) => value === wizard.review.assigned_to)?.[1];
   const selectedPriority = priorityLabels[(wizard.review.priority || "media") as ProductionTaskPriority];
+  const totalFiles = taskFiles.length + subtasks.reduce((sum, subtask) => sum + subtask.files.length, 0);
+
+  function addSubtask() {
+    setSubtasks((current) => [
+      ...current,
+      { id: crypto.randomUUID(), title: "", notes: "", employeeIds: [], files: [] },
+    ]);
+  }
+
+  function updateSubtask(id: string, patch: Partial<DraftSubtask>) {
+    setSubtasks((current) => current.map((subtask) => subtask.id === id ? { ...subtask, ...patch } : subtask));
+  }
+
+  function removeSubtask(id: string) {
+    setSubtasks((current) => current.filter((subtask) => subtask.id !== id));
+  }
+
+  function setValidatedFiles(files: File[], apply: (files: File[]) => void, existingCount: number) {
+    setFileError("");
+    const tooLarge = files.find((file) => file.size > 8 * 1024 * 1024);
+    if (tooLarge) {
+      setFileError(`${tooLarge.name} supera el máximo de 8 MB.`);
+      return;
+    }
+    if (totalFiles - existingCount + files.length > 20) {
+      setFileError("Puedes adjuntar máximo 20 archivos por tarea.");
+      return;
+    }
+    apply(files);
+  }
 
   return (
     <form
@@ -844,44 +1002,150 @@ function TaskCreateForm({
           return;
         }
         const formData = new FormData(event.currentTarget);
+        const subtaskInputs: ProductionSubtaskInput[] = subtasks.map((subtask) => ({
+          title: subtask.title.trim(),
+          notes: subtask.notes.trim() || null,
+          assigned_to: subtask.employeeIds
+            .map((employeeId) => assignableEmployees.find((employee) => employee.id === employeeId))
+            .filter((employee): employee is ProductionEmployeeOption => Boolean(employee))
+            .map((employee) => ({ employee_id: employee.id, employee_name: employee.name })),
+        }));
         onSubmit({
-          title: textValue(formData, "title"),
-          process_type: textValue(formData, "process_type"),
-          cost_center_code: textValue(formData, "cost_center_code"),
-          assigned_to: textValue(formData, "assigned_to"),
-          priority: textValue(formData, "priority") as ProductionTaskPriority,
-          planned_quantity: numberValue(formData, "planned_quantity"),
-          estimated_minutes: numberValue(formData, "estimated_hours") * 60,
-          notes: textValue(formData, "notes"),
+          input: {
+            title: textValue(formData, "title"),
+            process_type: textValue(formData, "process_type"),
+            cost_center_code: textValue(formData, "cost_center_code"),
+            assigned_to: textValue(formData, "assigned_to"),
+            priority: textValue(formData, "priority") as ProductionTaskPriority,
+            estimated_minutes: numberValue(formData, "estimated_hours") * 60,
+            notes: textValue(formData, "notes"),
+            subtasks: subtaskInputs,
+          },
+          taskFiles,
+          subtaskFiles: subtasks.map((subtask) => subtask.files),
+          fileCount: totalFiles,
         });
       }}
     >
       <WizardProgress steps={steps} currentStep={wizard.step} />
 
       <section className="task-wizard__step" data-wizard-step="0" hidden={wizard.step !== 0}>
-        <WizardHeading eyebrow="Paso 1 de 4" title="¿Que trabajo se necesita?" detail="Describe la tarea y selecciona el proceso de produccion." />
+        <WizardHeading eyebrow="Paso 1 de 5" title="¿Qué trabajo se necesita?" detail="Describe la tarea, selecciona el proceso y adjunta los archivos generales si los hay." />
         <Field name="title" label="Trabajo a realizar" placeholder="Ej. Soldar base de la maquina" required autoFocus />
         <SelectField name="process_type" label="Proceso" options={processOptions.map((process) => [process, process])} />
+        {extensionsReady ? (
+          <AttachmentPicker
+            label="Adjuntos de la tarea (opcional)"
+            detail="Planos, fotos, PDF, Word o Excel. Máximo 8 MB por archivo."
+            files={taskFiles}
+            onChange={(files) => setValidatedFiles(files, setTaskFiles, taskFiles.length)}
+          />
+        ) : null}
       </section>
 
       <section className="task-wizard__step" data-wizard-step="1" hidden={wizard.step !== 1}>
-        <WizardHeading eyebrow="Paso 2 de 4" title="¿Para quien y quien la hace?" detail="Busca el centro de costo y asigna un operario o ingeniero." />
+        <WizardHeading eyebrow="Paso 2 de 5" title="¿Para quién y quién la coordina?" detail="Busca el centro de costo y asigna el responsable general de la tarea." />
         <ComboboxField name="cost_center_code" label="Centro de costo" options={costCenters.map((costCenter) => [costCenter.code, costCenterLabel(costCenter)])} placeholder="Escribe codigo, cliente o nombre..." />
-        <SelectField name="assigned_to" label="Responsable" options={employeeOptions} blank={employeeOptions.length ? "Selecciona empleado" : "Sin empleados disponibles"} />
+        <SelectField name="assigned_to" label="Responsable general" options={employeeOptions} blank={employeeOptions.length ? "Selecciona empleado" : "Sin empleados disponibles"} />
       </section>
 
       <section className="task-wizard__step" data-wizard-step="2" hidden={wizard.step !== 2}>
-        <WizardHeading eyebrow="Paso 3 de 4" title="¿Como se debe planear?" detail="Define prioridad, cantidad, tiempo e indicaciones para ejecutar bien el trabajo." />
-        <div className="modal-form__grid modal-form__grid--3">
+        <WizardHeading eyebrow="Paso 3 de 5 · Opcional" title="¿La tarea tiene subtareas?" detail="Agrégalas solo si necesitas dividir el trabajo. Cada una puede tener varios operarios y sus propios adjuntos." />
+        {extensionsReady ? <div className="subtask-builder">
+          {subtasks.length ? (
+            <div className="subtask-builder__list">
+              {subtasks.map((subtask, index) => (
+                <div key={subtask.id} className="subtask-builder__card">
+                  <div className="subtask-builder__header">
+                    <strong>Subtarea {index + 1}</strong>
+                    <button type="button" onClick={() => removeSubtask(subtask.id)}>Eliminar</button>
+                  </div>
+                  <div className="subtask-builder__fields">
+                    <label className="block">
+                      <span className="label">Trabajo de esta subtarea</span>
+                      <input
+                        className="input"
+                        value={subtask.title}
+                        onChange={(event) => updateSubtask(subtask.id, { title: event.target.value })}
+                        placeholder="Ej. Cortar perfiles a la medida"
+                        required
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="label">Indicaciones (opcional)</span>
+                      <input
+                        className="input"
+                        value={subtask.notes}
+                        onChange={(event) => updateSubtask(subtask.id, { notes: event.target.value })}
+                        placeholder="Medidas, acabado o cuidado especial"
+                      />
+                    </label>
+                  </div>
+                  <div>
+                    <span className="label">Operarios responsables (puedes escoger varios)</span>
+                    <div className="employee-check-grid">
+                      {assignableEmployees.map((employee) => {
+                        const checked = subtask.employeeIds.includes(employee.id);
+                        return (
+                          <label key={employee.id} className={cn("employee-check", checked && "is-selected")}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => updateSubtask(subtask.id, {
+                                employeeIds: checked
+                                  ? subtask.employeeIds.filter((employeeId) => employeeId !== employee.id)
+                                  : [...subtask.employeeIds, employee.id],
+                              })}
+                            />
+                            <span>{employee.name}</span>
+                          </label>
+                        );
+                      })}
+                      {!assignableEmployees.length ? <small>No hay operarios o ingenieros disponibles.</small> : null}
+                    </div>
+                  </div>
+                  <AttachmentPicker
+                    label="Adjuntos de esta subtarea (opcional)"
+                    detail="Solo los archivos necesarios para este paso."
+                    files={subtask.files}
+                    compact
+                    onChange={(files) => setValidatedFiles(
+                      files,
+                      (nextFiles) => updateSubtask(subtask.id, { files: nextFiles }),
+                      subtask.files.length,
+                    )}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="subtask-builder__empty">
+              <strong>No es obligatorio dividir la tarea</strong>
+              <span>Puedes continuar sin subtareas.</span>
+            </div>
+          )}
+          <button type="button" className="btn-quiet subtask-builder__add" onClick={addSubtask}>
+            + Agregar subtarea
+          </button>
+        </div> : (
+          <div className="subtask-builder__empty">
+            <strong>Subtareas y adjuntos pendientes de activar</strong>
+            <span>Puedes crear la tarea general normalmente.</span>
+          </div>
+        )}
+      </section>
+
+      <section className="task-wizard__step" data-wizard-step="3" hidden={wizard.step !== 3}>
+        <WizardHeading eyebrow="Paso 4 de 5" title="¿Cómo se debe planear?" detail="Define prioridad, tiempo e indicaciones generales." />
+        <div className="modal-form__grid modal-form__grid--2">
           <SelectField name="priority" label="Prioridad" options={Object.entries(priorityLabels)} defaultValue="media" />
-          <Field name="planned_quantity" label="Cantidad" type="number" step="0.001" min="0.001" defaultValue="1" required />
           <Field name="estimated_hours" label="Tiempo aprox. (horas)" type="number" step="1" min="1" placeholder="Ej. 2" />
         </div>
         <TextareaField name="notes" label="Indicaciones" placeholder="Material, medida, acabado o cuidado especial..." />
       </section>
 
-      <section className="task-wizard__step" data-wizard-step="3" hidden={wizard.step !== 3}>
-        <WizardHeading eyebrow="PASO FINAL · 4 DE 4" title="Confirma antes de crear" detail="Esta es la ultima pantalla. Revisa todo y luego confirma la creacion." />
+      <section className="task-wizard__step" data-wizard-step="4" hidden={wizard.step !== 4}>
+        <WizardHeading eyebrow="PASO FINAL · 5 DE 5" title="Confirma antes de crear" detail="Revisa la tarea, sus responsables, subtareas y archivos." />
         <div className="task-wizard__review">
           <div className="task-wizard__review-main">
             <span>Trabajo</span>
@@ -891,15 +1155,83 @@ function TaskCreateForm({
           <ReviewItem label="Centro de costo" value={selectedCostCenter ? costCenterLabel(selectedCostCenter) : "Sin centro de costo"} />
           <ReviewItem label="Responsable" value={selectedEmployee || "Sin responsable"} />
           <ReviewItem label="Prioridad" value={selectedPriority || "Media"} />
-          <ReviewItem label="Cantidad" value={wizard.review.planned_quantity || "1"} />
           <ReviewItem label="Tiempo aproximado" value={wizard.review.estimated_hours ? `${wizard.review.estimated_hours} h` : "Sin estimar"} />
+          <ReviewItem label="Subtareas" value={subtasks.length ? `${subtasks.length} agregada${subtasks.length === 1 ? "" : "s"}` : "Sin subtareas"} />
+          <ReviewItem label="Archivos" value={totalFiles ? `${totalFiles} adjunto${totalFiles === 1 ? "" : "s"}` : "Sin adjuntos"} />
+          {subtasks.length ? (
+            <div className="task-wizard__review-subtasks">
+              <span>Distribución del trabajo</span>
+              {subtasks.map((subtask, index) => (
+                <div key={subtask.id}>
+                  <strong>{index + 1}. {subtask.title}</strong>
+                  <small>
+                    {subtask.employeeIds
+                      .map((employeeId) => assignableEmployees.find((employee) => employee.id === employeeId)?.name)
+                      .filter(Boolean)
+                      .join(", ") || "Sin operarios asignados"}
+                  </small>
+                </div>
+              ))}
+            </div>
+          ) : null}
           {wizard.review.notes ? <div className="task-wizard__review-notes"><span>Indicaciones</span><p>{wizard.review.notes}</p></div> : null}
         </div>
-        <div className="modal-hint"><strong>Paso final:</strong> al tocar “Confirmar y crear”, la tarea quedara lista en el tablero.</div>
+        <div className="modal-hint"><strong>Paso final:</strong> al confirmar se subirán los adjuntos y la tarea quedará lista en el tablero.</div>
       </section>
 
+      {fileError ? <div className="form-error" role="alert">{fileError}</div> : null}
       <WizardActions wizard={wizard} stepCount={steps.length} pending={pending} pendingLabel="Creando..." submitLabel="Confirmar y crear" onCancel={onCancel} />
     </form>
+  );
+}
+
+function AttachmentPicker({
+  label,
+  detail,
+  files,
+  onChange,
+  compact,
+}: {
+  label: string;
+  detail: string;
+  files: File[];
+  onChange: (files: File[]) => void;
+  compact?: boolean;
+}) {
+  const inputId = useId();
+  return (
+    <div className={cn("attachment-picker", compact && "attachment-picker--compact")}>
+      <div>
+        <span className="label">{label}</span>
+        <small>{detail}</small>
+      </div>
+      <label htmlFor={inputId} className="attachment-picker__button">
+        <span aria-hidden="true">+</span> Elegir archivos
+      </label>
+      <input
+        id={inputId}
+        className="attachment-picker__input"
+        type="file"
+        multiple
+        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+        onChange={(event) => {
+          const selected = Array.from(event.target.files ?? []);
+          if (selected.length) onChange([...files, ...selected]);
+          event.target.value = "";
+        }}
+      />
+      {files.length ? (
+        <div className="attachment-picker__files">
+          {files.map((file, index) => (
+            <span key={`${file.name}-${file.size}-${index}`}>
+              <b>{file.name}</b>
+              <small>{formatFileSize(file.size)}</small>
+              <button type="button" aria-label={`Quitar ${file.name}`} onClick={() => onChange(files.filter((_, fileIndex) => fileIndex !== index))}>×</button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1360,7 +1692,6 @@ function InventoryItemForm({
           category: textValue(formData, "category"),
           unit: textValue(formData, "unit"),
           stock: numberValue(formData, "stock"),
-          average_cost: numberValue(formData, "average_cost"),
           min_stock: numberValue(formData, "min_stock"),
           location: textValue(formData, "location"),
           preferred_supplier_id: textValue(formData, "preferred_supplier_id"),
@@ -1385,10 +1716,9 @@ function InventoryItemForm({
       </section>
 
       <section className="task-wizard__step" data-wizard-step="2" hidden={wizard.step !== 2}>
-        <WizardHeading eyebrow="Paso 3 de 4" title="¿Con cuanto inventario inicia?" detail="Registra existencias, costo, nivel minimo y proveedor si ya los conoces." />
-        <div className="modal-form__grid modal-form__grid--3">
+        <WizardHeading eyebrow="Paso 3 de 4" title="¿Con cuánto inventario inicia?" detail="Registra existencias, nivel mínimo y proveedor si ya los conoces." />
+        <div className="modal-form__grid modal-form__grid--2">
           <Field name="stock" label="Stock inicial" type="number" step="0.001" min="0" defaultValue="0" />
-          <Field name="average_cost" label="Costo promedio" type="number" step="0.01" min="0" defaultValue="0" />
           <Field name="min_stock" label="Stock minimo" type="number" step="0.001" min="0" defaultValue="0" />
         </div>
         <SelectField name="preferred_supplier_id" label="Proveedor preferido" options={suppliers.map((supplier) => [supplier.id, supplierLabel(supplier)])} blank="Sin proveedor fijo" />
@@ -1406,7 +1736,6 @@ function InventoryItemForm({
           <ReviewItem label="Unidad" value={wizard.review.unit || "und"} />
           <ReviewItem label="Ubicacion" value={wizard.review.location || "Sin ubicacion"} />
           <ReviewItem label="Stock inicial" value={wizard.review.stock || "0"} />
-          <ReviewItem label="Costo promedio" value={formatCOP(Number(wizard.review.average_cost || 0))} />
           <ReviewItem label="Stock minimo" value={wizard.review.min_stock || "0"} />
           <ReviewItem label="Proveedor" value={selectedSupplier ? supplierLabel(selectedSupplier) : "Sin proveedor fijo"} />
         </div>
@@ -1791,6 +2120,70 @@ function EmptyState({ title, detail, compact }: { title: string; detail: string;
   );
 }
 
+async function createProductionTaskWithUploads(submission: TaskCreateSubmission): Promise<string> {
+  const supabase = createBrowserClient();
+  const { data: authData } = await supabase.auth.getUser();
+  const user = authData.user;
+  if (!user) throw new Error("Tu sesión venció. Vuelve a ingresar.");
+
+  const uploadedPaths: string[] = [];
+  const draftFolder = crypto.randomUUID();
+  const uploadFiles = async (files: File[], scope: string) => {
+    const uploaded = [];
+    for (const [index, file] of files.entries()) {
+      if (file.size > 8 * 1024 * 1024) throw new Error(`${file.name} supera el máximo de 8 MB.`);
+      const cleanName = sanitizeUploadFileName(file.name);
+      const bucketPath = `${user.id}/${draftFolder}/${scope}/${String(index + 1).padStart(2, "0")}-${crypto.randomUUID()}-${cleanName}`;
+      const { error } = await supabase.storage
+        .from("production-task-attachments")
+        .upload(bucketPath, file, { contentType: file.type || "application/octet-stream", upsert: false });
+      if (error) throw new Error(`No se pudo subir ${file.name}. ${error.message}`);
+      uploadedPaths.push(bucketPath);
+      uploaded.push({
+        bucket_path: bucketPath,
+        file_name: file.name,
+        content_type: file.type || null,
+        size_bytes: file.size,
+      });
+    }
+    return uploaded;
+  };
+
+  try {
+    const taskAttachments = await uploadFiles(submission.taskFiles, "principal");
+    const subtasks = [];
+    for (const [index, subtask] of (submission.input.subtasks ?? []).entries()) {
+      subtasks.push({
+        ...subtask,
+        attachments: await uploadFiles(submission.subtaskFiles[index] ?? [], `subtarea-${index + 1}`),
+      });
+    }
+    return await createProductionTask({
+      ...submission.input,
+      attachments: taskAttachments,
+      subtasks,
+    });
+  } catch (error) {
+    if (uploadedPaths.length) {
+      await supabase.storage.from("production-task-attachments").remove(uploadedPaths);
+    }
+    throw error;
+  }
+}
+
+function sanitizeUploadFileName(value: string): string {
+  const cleanValue = normalizeSearchText(value)
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return cleanValue || "archivo";
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`;
+}
+
 function textValue(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
 }
@@ -1837,7 +2230,15 @@ function taskBelongsToUser(task: ProductionTask, email: string, userName: string
   const identityTokens = normalizeSearchText(`${userName} ${email.split("@")[0]}`)
     .split(/[^a-z0-9]+/)
     .filter((token) => token.length >= 4 && !["usuario", "produccion", "tecondor"].includes(token));
-  return identityTokens.some((token) => assignedWords.has(token));
+  if (identityTokens.some((token) => assignedWords.has(token))) return true;
+
+  const subtaskAssignmentWords = new Set(
+    (task.subtasks ?? [])
+      .flatMap((subtask) => subtask.assignments ?? [])
+      .flatMap((assignment) => normalizeSearchText(assignment.employee_name).split(/[^a-z0-9]+/))
+      .filter(Boolean),
+  );
+  return identityTokens.some((token) => subtaskAssignmentWords.has(token));
 }
 
 function taskLabel(task: ProductionTask): string {
