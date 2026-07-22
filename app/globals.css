@@ -801,8 +801,11 @@ button { touch-action: manipulation; }
   .task-filters button { min-height: 32px; gap: 5px; padding-right: 7px; padding-left: 10px; font-size: 10px; }
   .task-filters button b { min-width: 19px; height: 19px; font-size: 9px; }
   .task-row { gap: 7px; border-radius: 14px; padding: 8px; }
+  .task-row__badges { gap: 4px; }
+  .task-row__badges > span { padding-right: 7px; padding-left: 7px; font-size: 10px; }
   .task-row__title { margin-top: 6px; font-size: 16px; }
-  .task-row__facts { margin-top: 6px; gap: 4px; }
+  .task-row__facts { grid-template-columns: repeat(2,minmax(0,1fr)) !important; margin-top: 6px; gap: 4px; }
+  .task-row__facts > div { grid-column: auto !important; }
   .task-row__facts > div { border-radius: 8px; padding: 5px 7px; }
   .task-row__facts > div > div:first-child { font-size: 8px; }
   .task-row__facts > div > div:last-child { font-size: 11px; }
@@ -813,6 +816,10 @@ button { touch-action: manipulation; }
   .task-subtasks__header { min-height: 34px; padding: 5px 8px; }
   .task-subtasks__header span { font-size: 11px; }
   .task-subtasks__list { gap: 5px; padding: 5px; }
+  .workspace-section--tasks .workspace-panel { border-radius: 13px; padding: 9px; }
+  .workspace-section--tasks .workspace-panel__header { margin-bottom: 6px; }
+  .workspace-section--tasks .workspace-panel__header h2 { font-size: 15px; }
+  .workspace-section--tasks .workspace-panel__header p { display: none; }
   .inventory-edit-form__stock { grid-template-columns: 1fr; align-items: stretch; }
   .inventory-row-actions { min-width: 150px; }
   .inventory-row-actions button { flex: 1; }

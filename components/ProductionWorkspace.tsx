@@ -864,7 +864,7 @@ function TaskRow({
   return (
     <div id={`task-${task.id}`} className={cn("task-row grid gap-3 rounded-2xl border border-l-4 px-3 py-3 shadow-sm transition hover:shadow-md sm:px-4 sm:py-4 md:grid-cols-[1fr_auto] md:items-center", statusAccent[task.status], statusSurface[task.status], highlighted && "task-row--highlighted")}>
       <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="task-row__badges flex flex-wrap items-center gap-2">
           <span className="rounded-full bg-neutral-950 px-2.5 py-1 font-mono text-xs font-black text-white">TP-{String(task.task_number || 0).padStart(4, "0")}</span>
           <StatusBadge status={task.status} />
           <PriorityBadge priority={task.priority} />
@@ -2378,7 +2378,7 @@ function InventoryMovementForm({
 function Panel({ title, detail, children }: { title: string; detail?: string; children: React.ReactNode }) {
   return (
     <section className="workspace-panel rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm">
-      <div className="mb-3">
+      <div className="workspace-panel__header mb-3">
         <h2 className="font-black text-neutral-950">{title}</h2>
         {detail ? <p className="text-xs text-neutral-500">{detail}</p> : null}
       </div>
