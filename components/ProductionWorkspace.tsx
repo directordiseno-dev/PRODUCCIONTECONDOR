@@ -10,6 +10,7 @@ import {
   createInventoryMovement,
   createProductionTask,
   deleteProductionTask,
+  recordProductionOvertime,
   updateInventoryItem,
   updateProductionSubtaskStatus,
   updateProductionTaskStatus,
@@ -42,6 +43,7 @@ type DraftSubtask = {
   title: string;
   notes: string;
   employeeIds: string[];
+  costCenterCodes: string[];
   files: File[];
 };
 type TaskCreateSubmission = {
@@ -50,6 +52,9 @@ type TaskCreateSubmission = {
   subtaskFiles: File[][];
   fileCount: number;
 };
+type PauseTarget =
+  | { kind: "task"; task: ProductionTask }
+  | { kind: "subtask"; subtask: ProductionSubtask };
 
 const processOptions = [
   "Soldadura",
@@ -109,6 +114,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
   const [consumptionTaskId, setConsumptionTaskId] = useState("");
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [taskPendingDeletion, setTaskPendingDeletion] = useState<ProductionTask | null>(null);
+  const [pauseTarget, setPauseTarget] = useState<PauseTarget | null>(null);
   const [highlightedTaskId, setHighlightedTaskId] = useState("");
   const [activeOperatorId, setActiveOperatorId] = useState("");
   const [operatorPickerOpen, setOperatorPickerOpen] = useState(false);
@@ -159,6 +165,9 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
       "production_subtasks",
       "production_subtask_assignments",
       "production_work_sessions",
+      "production_task_cost_centers",
+      "production_subtask_cost_centers",
+      "production_overtime_sessions",
       "production_task_materials",
       "inventory_items",
       "inventory_movements",
@@ -291,16 +300,33 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
               pending={isPending}
               highlightedTaskId={highlightedTaskId}
               timeTrackingReady={data.timeTrackingReady}
+              advancedPlanningReady={data.advancedPlanningReady}
               onConsumeTask={openConsumption}
-              onStatus={(task, status) => requestTaskAttribution(
-                `${statusActionLabels[status] || "actualizar"} la tarea`,
-                (operatorId) => runAction("Actualizando tarea...", () => updateProductionTaskStatus(task.id, status, null, operatorId), "Tarea actualizada."),
-              )}
-              onSubtaskStatus={(subtask, status) => requestTaskAttribution(
-                `${statusActionLabels[status] || "actualizar"} la subtarea`,
-                (operatorId) => runAction("Actualizando subtarea...", () => updateProductionSubtaskStatus(subtask.id, status, operatorId), "Subtarea actualizada."),
-              )}
+              onStatus={(task, status) => {
+                if (status === "pausada") {
+                  setPauseTarget({ kind: "task", task });
+                  return;
+                }
+                requestTaskAttribution(
+                  `${statusActionLabels[status] || "actualizar"} la tarea`,
+                  (operatorId) => runAction("Actualizando tarea...", () => updateProductionTaskStatus(task.id, status, null, operatorId), "Tarea actualizada."),
+                );
+              }}
+              onSubtaskStatus={(subtask, status) => {
+                if (status === "pausada") {
+                  setPauseTarget({ kind: "subtask", subtask });
+                  return;
+                }
+                requestTaskAttribution(
+                  `${statusActionLabels[status] || "actualizar"} la subtarea`,
+                  (operatorId) => runAction("Actualizando subtarea...", () => updateProductionSubtaskStatus(subtask.id, status, operatorId), "Subtarea actualizada."),
+                );
+              }}
               onDelete={setTaskPendingDeletion}
+              onRecordOvertime={(task) => requestTaskAttribution(
+                "registrar las horas extra trabajadas hasta ahora",
+                (operatorId) => runAction("Registrando horas extra...", () => recordProductionOvertime(task.id, null, operatorId), "Horas extra registradas."),
+              )}
             />
           ) : null}
 
@@ -329,6 +355,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
           costCenters={data.cost_centers}
           employees={data.employees}
           extensionsReady={data.taskExtensionsReady}
+          advancedPlanningReady={data.advancedPlanningReady}
           pending={isPending}
           onCancel={() => setModal(null)}
           onSubmit={(submission) => requestTaskAttribution("crear esta tarea", (operatorId) => runAction(
@@ -381,6 +408,35 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
           onCancel={() => setModal(null)}
           onSubmit={(form) => runAction("Registrando movimiento de inventario...", () => createInventoryMovement(form), "Movimiento registrado.", () => { setModal(null); setActiveTab("inventario"); })}
         />
+      </WorkspaceModalPanel>
+
+      <WorkspaceModalPanel
+        open={Boolean(pauseTarget)}
+        title="¿Por qué se pausa?"
+        detail="El motivo, la hora y la persona quedarán registrados en el historial."
+        onClose={() => setPauseTarget(null)}
+      >
+        {pauseTarget ? (
+          <PauseReasonForm
+            key={`${pauseTarget.kind}-${pauseTarget.kind === "task" ? pauseTarget.task.id : pauseTarget.subtask.id}`}
+            pending={isPending}
+            onCancel={() => setPauseTarget(null)}
+            onConfirm={(reason) => {
+              const target = pauseTarget;
+              setPauseTarget(null);
+              requestTaskAttribution(
+                target.kind === "task" ? "pausar la tarea" : "pausar la subtarea",
+                (operatorId) => runAction(
+                  "Registrando pausa...",
+                  () => target.kind === "task"
+                    ? updateProductionTaskStatus(target.task.id, "pausada", reason, operatorId)
+                    : updateProductionSubtaskStatus(target.subtask.id, "pausada", operatorId, reason),
+                  "Pausa registrada con su motivo.",
+                ),
+              );
+            }}
+          />
+        ) : null}
       </WorkspaceModalPanel>
 
       <WorkspaceModalPanel
@@ -676,36 +732,62 @@ function TasksTab({
   pending,
   highlightedTaskId,
   timeTrackingReady,
+  advancedPlanningReady,
   onConsumeTask,
   onStatus,
   onSubtaskStatus,
   onDelete,
+  onRecordOvertime,
 }: {
   tasks: ProductionTask[];
   pending: boolean;
   highlightedTaskId: string;
   timeTrackingReady: boolean;
+  advancedPlanningReady: boolean;
   onConsumeTask: (taskId?: string) => void;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
   onSubtaskStatus: (subtask: ProductionSubtask, status: ProductionTaskStatus) => void;
   onDelete: (task: ProductionTask) => void;
+  onRecordOvertime: (task: ProductionTask) => void;
 }) {
-  const [filter, setFilter] = useState<"todas" | "activas" | "historial" | ProductionTaskStatus>("todas");
+  const [filter, setFilter] = useState<"todas" | "activas" | "historial" | ProductionTaskStatus>("activas");
+  const [responsibleFilter, setResponsibleFilter] = useState("");
+  const [costCenterFilter, setCostCenterFilter] = useState("");
   const [selectedTaskId, setSelectedTaskId] = useState("");
   const historyTasks = tasks
     .filter((task) => ["terminada", "revisada"].includes(task.status))
     .sort((left, right) => Date.parse(right.finished_at || right.updated_at) - Date.parse(left.finished_at || left.updated_at));
-  const filteredTasks = filter === "todas"
+  const statusFilteredTasks = filter === "todas"
     ? tasks
     : filter === "activas"
     ? tasks.filter((task) => !["terminada", "revisada", "cancelada"].includes(task.status))
     : filter === "historial"
       ? historyTasks
       : tasks.filter((task) => task.status === filter);
+  const filteredTasks = statusFilteredTasks.filter((task) => {
+    const responsibleNames = [
+      ...(task.assigned_to || "").split(","),
+      ...task.subtasks.flatMap((subtask) => subtask.assignments.map((assignment) => assignment.employee_name)),
+    ].map((name) => normalizeSearchText(name)).filter(Boolean);
+    const taskCostCenters = Array.from(new Set([
+      ...(task.cost_center_codes ?? []),
+      ...task.subtasks.flatMap((subtask) => subtask.cost_center_codes ?? []),
+    ]));
+    return (!responsibleFilter || responsibleNames.includes(normalizeSearchText(responsibleFilter)))
+      && (!costCenterFilter || taskCostCenters.includes(costCenterFilter));
+  });
   const activeCount = tasks.filter((task) => !["terminada", "revisada", "cancelada"].includes(task.status)).length;
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null;
   const selectedTaskIsFinal = Boolean(selectedTask && ["terminada", "revisada"].includes(selectedTask.status));
-  const historyGroups = groupTasksByFinishedDay(historyTasks);
+  const historyGroups = groupTasksByFinishedDay(filteredTasks);
+  const responsibleOptions = Array.from(new Set(tasks.flatMap((task) => [
+    ...(task.assigned_to || "").split(","),
+    ...task.subtasks.flatMap((subtask) => subtask.assignments.map((assignment) => assignment.employee_name)),
+  ]).map((name) => name.trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right));
+  const costCenterOptions = Array.from(new Set(tasks.flatMap((task) => [
+    ...(task.cost_center_codes ?? []),
+    ...task.subtasks.flatMap((subtask) => subtask.cost_center_codes ?? []),
+  ]))).sort();
   const filters: Array<["todas" | "activas" | "historial" | ProductionTaskStatus, string, number]> = [
     ["todas", "Todas", tasks.length],
     ["activas", "Activas", activeCount],
@@ -716,11 +798,13 @@ function TasksTab({
   ];
 
   useEffect(() => {
-    if (highlightedTaskId) setFilter("todas");
-  }, [highlightedTaskId]);
+    if (!highlightedTaskId) return;
+    const highlightedTask = tasks.find((task) => task.id === highlightedTaskId);
+    setFilter(highlightedTask && ["terminada", "revisada"].includes(highlightedTask.status) ? "historial" : "activas");
+  }, [highlightedTaskId, tasks]);
 
   useEffect(() => {
-    if (!highlightedTaskId || filter !== "todas") return;
+    if (!highlightedTaskId) return;
     const timeout = window.setTimeout(() => document.getElementById(`task-${highlightedTaskId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
     return () => window.clearTimeout(timeout);
   }, [filter, highlightedTaskId]);
@@ -741,6 +825,22 @@ function TasksTab({
             <span>{label}</span><b>{count}</b>
           </button>
         ))}
+      </div>
+      <div className="task-secondary-filters">
+        <label>
+          <span>Responsable</span>
+          <select value={responsibleFilter} onChange={(event) => setResponsibleFilter(event.target.value)}>
+            <option value="">Todos</option>
+            {responsibleOptions.map((name) => <option key={name} value={name}>{name}</option>)}
+          </select>
+        </label>
+        <label>
+          <span>Centro de costo</span>
+          <select value={costCenterFilter} onChange={(event) => setCostCenterFilter(event.target.value)}>
+            <option value="">Todos</option>
+            {costCenterOptions.map((code) => <option key={code} value={code}>{code}</option>)}
+          </select>
+        </label>
       </div>
       <Panel
         title={filter === "historial" ? "Historial por dias" : "Tareas de planta"}
@@ -782,6 +882,7 @@ function TasksTab({
           detailMode
           readOnly={selectedTaskIsFinal}
           timeTrackingReady={timeTrackingReady}
+          overtimeReady={advancedPlanningReady}
           onStatus={onStatus}
           onSubtaskStatus={onSubtaskStatus}
           onDelete={(task) => {
@@ -792,6 +893,7 @@ function TasksTab({
             setSelectedTaskId("");
             onConsumeTask(selectedTask.id);
           }}
+          onRecordOvertime={() => onRecordOvertime(selectedTask)}
         />
       ) : null}
     </WorkspaceModalPanel>
@@ -898,8 +1000,8 @@ function CompactTaskRow({
   onOpen: () => void;
 }) {
   const statusAccent: Record<ProductionTaskStatus, string> = {
-    pendiente: "border-l-amber-400",
-    en_proceso: "border-l-sky-500",
+    pendiente: "border-l-red-500",
+    en_proceso: "border-l-amber-400",
     pausada: "border-l-neutral-400",
     bloqueada: "border-l-red-500",
     terminada: "border-l-emerald-500",
@@ -909,24 +1011,28 @@ function CompactTaskRow({
   const completedSubtasks = task.subtasks.filter((subtask) => ["terminada", "revisada"].includes(subtask.status)).length;
   const isNewTask = task.status === "pendiente" && !task.started_at;
   const isFinalTask = ["terminada", "revisada"].includes(task.status);
+  const isPartialTask = !isFinalTask
+    && task.subtasks.some((subtask) => subtask.status === "pendiente")
+    && task.subtasks.some((subtask) => subtask.status !== "pendiente");
 
   return (
     <button
       id={`task-${task.id}`}
       type="button"
-      className={cn("compact-task-row", statusAccent[task.status], isNewTask && "compact-task-row--new", isFinalTask && "compact-task-row--history", highlighted && "task-row--highlighted")}
+      className={cn("compact-task-row", statusAccent[task.status], isNewTask && "compact-task-row--new", isPartialTask && "compact-task-row--partial", isFinalTask && "compact-task-row--history", highlighted && "task-row--highlighted")}
       onClick={onOpen}
       aria-label={`Abrir tarea TP-${String(task.task_number || 0).padStart(4, "0")}: ${task.title}`}
     >
       <span className="compact-task-row__main">
         <span className="compact-task-row__badges">
           <b>TP-{String(task.task_number || 0).padStart(4, "0")}</b>
-          {isNewTask ? <NewTaskBadge /> : <StatusBadge status={task.status} />}
+          {isNewTask ? <NewTaskBadge /> : isPartialTask ? <PartialTaskBadge /> : <StatusBadge status={task.status} />}
           <PriorityBadge priority={task.priority} />
         </span>
         <strong>{task.title}</strong>
         <span className="compact-task-row__meta">
           <span>{task.assigned_to || "Sin responsable"}</span>
+          {task.cost_center_codes?.length ? <span>CC {task.cost_center_codes.join(", ")}</span> : null}
           <span>{task.process_type}</span>
           <span>{formatEstimatedHours(task.estimated_minutes)}</span>
         </span>
@@ -953,10 +1059,12 @@ function TaskRow({
   detailMode = false,
   readOnly = false,
   timeTrackingReady = false,
+  overtimeReady = false,
   onStatus,
   onSubtaskStatus = () => undefined,
   onDelete,
   onConsume,
+  onRecordOvertime,
 }: {
   task: ProductionTask;
   pending: boolean;
@@ -964,14 +1072,16 @@ function TaskRow({
   detailMode?: boolean;
   readOnly?: boolean;
   timeTrackingReady?: boolean;
+  overtimeReady?: boolean;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
   onSubtaskStatus?: (subtask: ProductionSubtask, status: ProductionTaskStatus) => void;
   onDelete?: (task: ProductionTask) => void;
   onConsume?: () => void;
+  onRecordOvertime?: () => void;
 }) {
   const statusAccent: Record<ProductionTaskStatus, string> = {
-    pendiente: "border-l-amber-400",
-    en_proceso: "border-l-sky-500",
+    pendiente: "border-l-red-500",
+    en_proceso: "border-l-amber-400",
     pausada: "border-l-neutral-400",
     bloqueada: "border-l-red-500",
     terminada: "border-l-emerald-500",
@@ -979,8 +1089,8 @@ function TaskRow({
     cancelada: "border-l-neutral-300",
   };
   const statusSurface: Record<ProductionTaskStatus, string> = {
-    pendiente: "bg-amber-50/70 border-amber-200",
-    en_proceso: "bg-sky-50/70 border-sky-200",
+    pendiente: "bg-red-50/70 border-red-200",
+    en_proceso: "bg-amber-50/70 border-amber-200",
     pausada: "bg-neutral-100 border-neutral-300",
     bloqueada: "bg-red-50/70 border-red-200",
     terminada: "bg-emerald-50/75 border-emerald-200",
@@ -992,12 +1102,17 @@ function TaskRow({
     .map((name) => name.trim())
     .filter(Boolean);
   const isNewTask = task.status === "pendiente" && !task.started_at;
+  const isPartialTask = !["terminada", "revisada"].includes(task.status)
+    && task.subtasks.some((subtask) => subtask.status === "pendiente")
+    && task.subtasks.some((subtask) => subtask.status !== "pendiente");
+  const overtimeSessionsToday = (task.overtime_sessions ?? []).filter((session) => isTodayInBogota(session.ended_at || session.started_at));
+  const currentPause = task.status === "pausada" ? latestPauseSession(task.work_sessions) : null;
   return (
-    <div id={`task-${task.id}`} className={cn("task-row grid gap-3 rounded-2xl border border-l-4 px-3 py-3 shadow-sm transition hover:shadow-md sm:px-4 sm:py-4 md:grid-cols-[1fr_auto] md:items-center", statusAccent[task.status], statusSurface[task.status], highlighted && "task-row--highlighted", detailMode && "task-row--detail")}>
+    <div id={`task-${task.id}`} className={cn("task-row grid gap-3 rounded-2xl border border-l-4 px-3 py-3 shadow-sm transition hover:shadow-md sm:px-4 sm:py-4 md:grid-cols-[1fr_auto] md:items-center", statusAccent[task.status], statusSurface[task.status], isPartialTask && "task-row--partial", highlighted && "task-row--highlighted", detailMode && "task-row--detail")}>
       <div className="min-w-0">
         <div className="task-row__badges flex flex-wrap items-center gap-2">
           {!detailMode ? <span className="rounded-full bg-neutral-950 px-2.5 py-1 font-mono text-xs font-black text-white">TP-{String(task.task_number || 0).padStart(4, "0")}</span> : null}
-          {isNewTask ? <NewTaskBadge /> : <StatusBadge status={task.status} />}
+          {isNewTask ? <NewTaskBadge /> : isPartialTask ? <PartialTaskBadge /> : <StatusBadge status={task.status} />}
           <PriorityBadge priority={task.priority} />
           {task.cost_center_code ? <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-bold text-neutral-600">{task.cost_center_code}</span> : null}
         </div>
@@ -1012,6 +1127,12 @@ function TaskRow({
                   : <b>Sin responsable</b>}
               </div>
             </div>
+            {task.cost_center_codes?.length ? (
+              <div className="task-detail-cost-centers">
+                <span>Centros de costo</span>
+                <div>{task.cost_center_codes.map((code) => <b key={code}>{code}</b>)}</div>
+              </div>
+            ) : null}
             <div className="task-detail-meta">
               <span><small>Proceso</small><b>{task.process_type}</b></span>
               <span><small>Tiempo aprox.</small><b>{formatEstimatedHours(task.estimated_minutes)}</b></span>
@@ -1027,6 +1148,12 @@ function TaskRow({
           </div>
         )}
         {task.notes ? <p className="mt-2 line-clamp-2 text-xs text-neutral-500">{task.notes}</p> : null}
+        {currentPause ? (
+          <div className="task-current-pause">
+            <strong>Pausada: {currentPause.end_reason?.replace(/^Pausa:\s*/, "")}</strong>
+            <span>{formatWorkTimestamp(Date.parse(currentPause.ended_at || ""))} · {currentPause.ended_by || "Sin persona"}</span>
+          </div>
+        ) : null}
         {task.attachments.length ? (
           <AttachmentLinks attachments={task.attachments} className="task-row__attachments" />
         ) : null}
@@ -1050,6 +1177,18 @@ function TaskRow({
         ) : null}
         {["terminada", "revisada"].includes(task.status) ? (
           <TaskTimingSummary task={task} timeTrackingReady={timeTrackingReady} defaultOpen={readOnly} />
+        ) : null}
+        {overtimeReady && !readOnly ? (
+          <div className={cn("task-overtime", overtimeSessionsToday.length && "task-overtime--active")}>
+            <div>
+              <span>Horas extra</span>
+              <strong>{overtimeSessionsToday.length ? `${overtimeSessionsToday.length} registro${overtimeSessionsToday.length === 1 ? "" : "s"} hoy` : "Sin registrar hoy"}</strong>
+              <small>Después de las 5:00 p. m. registra lo trabajado hasta la hora actual. El siguiente registro continúa desde el anterior.</small>
+            </div>
+            <div>
+              {onRecordOvertime ? <button type="button" className="btn-primary" disabled={pending} onClick={onRecordOvertime}>Registrar horas extra hasta ahora</button> : null}
+            </div>
+          </div>
         ) : null}
       </div>
       {readOnly ? (
@@ -1097,6 +1236,33 @@ function TaskRow({
       </div>
       )}
     </div>
+  );
+}
+
+function PauseReasonForm({
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  return (
+    <form className="pause-reason-form" onSubmit={(event) => {
+      event.preventDefault();
+      if (reason.trim()) onConfirm(reason.trim());
+    }}>
+      <label>
+        <span>Motivo obligatorio</span>
+        <textarea autoFocus rows={4} value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Ej. Falta material, cambio de prioridad o espera de una pieza..." />
+      </label>
+      <div>
+        <button type="button" className="btn-secondary" disabled={pending} onClick={onCancel}>Cancelar</button>
+        <button type="submit" className="btn-primary" disabled={pending || !reason.trim()}>Registrar pausa</button>
+      </div>
+    </form>
   );
 }
 
@@ -1178,6 +1344,12 @@ function TaskTimingSummary({ task, timeTrackingReady, defaultOpen = false }: { t
     : Number.NaN;
   const estimatedMs = Math.max(0, task.estimated_minutes) * 60_000;
   const varianceMs = Number.isFinite(activeMs) && estimatedMs > 0 ? activeMs - estimatedMs : Number.NaN;
+  const overtimeMs = (task.overtime_sessions ?? []).reduce((total, session) => {
+    const startedAt = Date.parse(session.started_at);
+    const endedAt = Date.parse(session.ended_at || "");
+    const effectiveEnd = Number.isFinite(endedAt) ? endedAt : Date.now();
+    return Number.isFinite(startedAt) && effectiveEnd > startedAt ? total + effectiveEnd - startedAt : total;
+  }, 0);
   const totalLabel = Number.isFinite(elapsedMs) ? formatWorkDuration(elapsedMs) : "Sin dato";
   const lastClosedSession = task.work_sessions.reduce<ProductionWorkSession | null>((latest, session) => {
     const endedAt = Date.parse(session.ended_at || "");
@@ -1185,6 +1357,10 @@ function TaskTimingSummary({ task, timeTrackingReady, defaultOpen = false }: { t
     if (!Number.isFinite(endedAt)) return latest;
     return !latest || !Number.isFinite(latestEndedAt) || endedAt > latestEndedAt ? session : latest;
   }, null);
+  const pauseRecords = [
+    ...task.work_sessions.map((session) => ({ session, scope: "Tarea general" })),
+    ...task.subtasks.flatMap((subtask) => subtask.work_sessions.map((session) => ({ session, scope: subtask.title }))),
+  ].filter(({ session }) => session.end_reason?.startsWith("Pausa:"));
 
   return (
     <details className="task-timing" open={defaultOpen}>
@@ -1196,6 +1372,7 @@ function TaskTimingSummary({ task, timeTrackingReady, defaultOpen = false }: { t
         <div className="task-timing__metrics">
           <TimingMetric label="Tiempo activo" value={formatWorkDuration(activeMs)} />
           <TimingMetric label="Tiempo en pausa" value={formatWorkDuration(pausedMs)} />
+          <TimingMetric label="Horas extra" value={overtimeMs > 0 ? formatWorkDuration(overtimeMs) : "Sin registro"} />
           <TimingMetric label="Duración en jornada" value={totalLabel} />
           <TimingMetric
             label="Frente al estimado"
@@ -1212,6 +1389,30 @@ function TaskTimingSummary({ task, timeTrackingReady, defaultOpen = false }: { t
           <span><b>Terminación:</b> {formatWorkTimestamp(Number.isFinite(finishedAtMs) ? finishedAtMs : null)}</span>
           {lastClosedSession?.ended_by ? <span><b>Cerrada por:</b> {createdByLabel(lastClosedSession.ended_by)}</span> : null}
         </div>
+        {pauseRecords.length ? (
+          <div className="task-timing__pauses">
+            <strong>Pausas registradas</strong>
+            {pauseRecords.map(({ session, scope }) => (
+              <div key={session.id}>
+                <span>{scope}</span>
+                <b>{session.end_reason?.replace(/^Pausa:\s*/, "")}</b>
+                <small>{formatWorkTimestamp(Date.parse(session.ended_at || ""))} · {session.ended_by || "Sin persona"}</small>
+              </div>
+            ))}
+          </div>
+        ) : null}
+        {task.overtime_sessions?.length ? (
+          <div className="task-timing__overtime">
+            <strong>Registro de horas extra</strong>
+            {task.overtime_sessions.map((session) => (
+              <div key={session.id}>
+                <span>{formatWorkTimestamp(Date.parse(session.started_at))}</span>
+                <b>{formatWorkDuration(Math.max(0, (Date.parse(session.ended_at || "") || Date.now()) - Date.parse(session.started_at)))}</b>
+                <small>{session.started_by || "Sin persona"}{session.ended_by ? ` · salida: ${session.ended_by}` : " · activa"}</small>
+              </div>
+            ))}
+          </div>
+        ) : null}
         {task.subtasks.length ? (
           <div className="task-timing__subtasks">
             <strong>Tiempo por subtarea</strong>
@@ -1255,6 +1456,15 @@ function sumSessionDuration(sessions: ProductionWorkSession[], fallbackEndMs: nu
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return total;
     return total + scheduledWorkDuration(startMs, endMs);
   }, 0);
+}
+
+function latestPauseSession(sessions: ProductionWorkSession[]): ProductionWorkSession | null {
+  return sessions.reduce<ProductionWorkSession | null>((latest, session) => {
+    if (!session.end_reason?.startsWith("Pausa:")) return latest;
+    const endedAt = Date.parse(session.ended_at || "");
+    const latestEndedAt = Date.parse(latest?.ended_at || "");
+    return !latest || (!Number.isFinite(latestEndedAt) || endedAt > latestEndedAt) ? session : latest;
+  }, null);
 }
 
 function scheduledWorkDuration(startMs: number, endMs: number): number {
@@ -1309,6 +1519,18 @@ function formatWorkTimestamp(value: number | null): string {
   }).format(new Date(value));
 }
 
+function isTodayInBogota(value: string | null): boolean {
+  const date = new Date(value || "");
+  if (!Number.isFinite(date.getTime())) return false;
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return formatter.format(date) === formatter.format(new Date());
+}
+
 function SubtaskRow({
   subtask,
   pending,
@@ -1334,6 +1556,7 @@ function SubtaskRow({
     : subtask.status === "pendiente"
       ? "Sin iniciar"
       : "Sin detalle";
+  const currentPause = subtask.status === "pausada" ? latestPauseSession(subtask.work_sessions) : null;
   return (
     <div className={cn("subtask-row", `subtask-row--${subtask.status}`)}>
       <div className="subtask-row__main">
@@ -1350,7 +1573,18 @@ function SubtaskRow({
               : <b>Sin asignar</b>}
           </div>
         </div>
+        {subtask.cost_center_codes?.length ? (
+          <div className="subtask-row__centers">
+            <span>CC</span>{subtask.cost_center_codes.map((code) => <b key={code}>{code}</b>)}
+          </div>
+        ) : null}
         {subtask.notes ? <p>{subtask.notes}</p> : null}
+        {currentPause ? (
+          <div className="subtask-row__pause">
+            <b>{currentPause.end_reason?.replace(/^Pausa:\s*/, "")}</b>
+            <small>{formatWorkTimestamp(Date.parse(currentPause.ended_at || ""))} · {currentPause.ended_by || "Sin persona"}</small>
+          </div>
+        ) : null}
         {subtask.attachments.length ? <AttachmentLinks attachments={subtask.attachments} /> : null}
       </div>
       <div className="subtask-row__actions">
@@ -1568,6 +1802,7 @@ function TaskCreateForm({
   costCenters,
   employees,
   extensionsReady,
+  advancedPlanningReady,
   pending,
   onSubmit,
   onCancel,
@@ -1575,6 +1810,7 @@ function TaskCreateForm({
   costCenters: CostCenterOption[];
   employees: ProductionEmployeeOption[];
   extensionsReady: boolean;
+  advancedPlanningReady: boolean;
   pending: boolean;
   onSubmit: (submission: TaskCreateSubmission) => void;
   onCancel: () => void;
@@ -1586,13 +1822,16 @@ function TaskCreateForm({
     [employees],
   );
   const [mainEmployeeIds, setMainEmployeeIds] = useState<string[]>([]);
+  const [taskCostCenterCodes, setTaskCostCenterCodes] = useState<string[]>([]);
   const [taskFiles, setTaskFiles] = useState<File[]>([]);
   const [subtasks, setSubtasks] = useState<DraftSubtask[]>([]);
   const [fileError, setFileError] = useState("");
   const steps = ["Trabajo", "Asignacion", "Subtareas", "Planeacion", "Confirmacion"];
   const wizard = useFormWizard(steps.length);
 
-  const selectedCostCenter = costCenters.find((costCenter) => costCenter.code === wizard.review.cost_center_code);
+  const selectedCostCenters = taskCostCenterCodes
+    .map((code) => costCenters.find((costCenter) => costCenter.code === code))
+    .filter((costCenter): costCenter is CostCenterOption => Boolean(costCenter));
   const selectedEmployeeNames = mainEmployeeIds
     .map((employeeId) => assignableEmployees.find((employee) => employee.id === employeeId)?.name)
     .filter((name): name is string => Boolean(name));
@@ -1603,7 +1842,7 @@ function TaskCreateForm({
     const id = crypto.randomUUID();
     setSubtasks((current) => [
       ...current,
-      { id, title: "", notes: "", employeeIds: [], files: [] },
+      { id, title: "", notes: "", employeeIds: [], costCenterCodes: [], files: [] },
     ]);
     window.requestAnimationFrame(() => {
       const card = document.querySelector<HTMLElement>(`[data-subtask-id="${id}"]`);
@@ -1648,9 +1887,18 @@ function TaskCreateForm({
           return;
         }
         const formData = new FormData(event.currentTarget);
+        const selectedTimeValue = numberValue(formData, "estimated_time");
+        const selectedTimeUnit = textValue(formData, "estimated_time_unit");
+        const legacyCostCenter = textValue(formData, "cost_center_code");
+        const selectedTaskCostCenters = advancedPlanningReady
+          ? taskCostCenterCodes
+          : legacyCostCenter
+            ? [legacyCostCenter]
+            : [];
         const subtaskInputs: ProductionSubtaskInput[] = subtasks.map((subtask) => ({
           title: subtask.title.trim(),
           notes: subtask.notes.trim() || null,
+          cost_center_codes: subtask.costCenterCodes,
           assigned_to: subtask.employeeIds
             .map((employeeId) => assignableEmployees.find((employee) => employee.id === employeeId))
             .filter((employee): employee is ProductionEmployeeOption => Boolean(employee))
@@ -1660,10 +1908,11 @@ function TaskCreateForm({
           input: {
             title: textValue(formData, "title"),
             process_type: textValue(formData, "process_type"),
-            cost_center_code: textValue(formData, "cost_center_code"),
+            cost_center_code: selectedTaskCostCenters[0] || null,
+            cost_center_codes: selectedTaskCostCenters,
             assigned_to: selectedEmployeeNames.join(", "),
             priority: textValue(formData, "priority") as ProductionTaskPriority,
-            estimated_minutes: numberValue(formData, "estimated_hours") * 60,
+            estimated_minutes: selectedTimeUnit === "minutes" ? selectedTimeValue : selectedTimeValue * 60,
             notes: textValue(formData, "notes"),
             subtasks: subtaskInputs,
           },
@@ -1690,8 +1939,23 @@ function TaskCreateForm({
       </section>
 
       <section className="task-wizard__step" data-wizard-step="1" hidden={wizard.step !== 1}>
-        <WizardHeading eyebrow="Paso 2 de 5" title="¿Para quién y quiénes son responsables?" detail="Busca el centro de costo y selecciona uno o varios operarios o ingenieros." />
-        <ComboboxField name="cost_center_code" label="Centro de costo" options={costCenters.map((costCenter) => [costCenter.code, costCenterLabel(costCenter)])} placeholder="Escribe codigo, cliente o nombre..." />
+        <WizardHeading eyebrow="Paso 2 de 5" title="¿Para quién y quiénes son responsables?" detail="Selecciona uno o varios centros de costo y los responsables." />
+        {advancedPlanningReady ? (
+          <CostCenterMultiSelect
+            label="Centros de costo de la tarea"
+            costCenters={costCenters}
+            value={taskCostCenterCodes}
+            onChange={(codes) => {
+              setTaskCostCenterCodes(codes);
+              setSubtasks((current) => current.map((subtask) => ({
+                ...subtask,
+                costCenterCodes: subtask.costCenterCodes.filter((code) => codes.includes(code)),
+              })));
+            }}
+          />
+        ) : (
+          <ComboboxField name="cost_center_code" label="Centro de costo" options={costCenters.map((costCenter) => [costCenter.code, costCenterLabel(costCenter)])} placeholder="Escribe codigo, cliente o nombre..." />
+        )}
         <EmployeeMultiSelect
           label="Responsables de la tarea (puedes escoger varios)"
           employees={assignableEmployees}
@@ -1739,6 +2003,15 @@ function TaskCreateForm({
                     value={subtask.employeeIds}
                     onChange={(employeeIds) => updateSubtask(subtask.id, { employeeIds })}
                   />
+                  {advancedPlanningReady && taskCostCenterCodes.length ? (
+                    <CostCenterMultiSelect
+                      label="Centros de costo de esta subtarea"
+                      costCenters={selectedCostCenters}
+                      value={subtask.costCenterCodes}
+                      onChange={(costCenterCodes) => updateSubtask(subtask.id, { costCenterCodes })}
+                      compact
+                    />
+                  ) : null}
                   <AttachmentPicker
                     label="Adjuntos de esta subtarea (opcional)"
                     detail="Solo los archivos necesarios para este paso."
@@ -1774,7 +2047,8 @@ function TaskCreateForm({
         <WizardHeading eyebrow="Paso 4 de 5" title="¿Cómo se debe planear?" detail="Define prioridad, tiempo e indicaciones generales." />
         <div className="modal-form__grid modal-form__grid--2">
           <SelectField name="priority" label="Prioridad" options={Object.entries(priorityLabels)} defaultValue="media" />
-          <Field name="estimated_hours" label="Tiempo aprox. (horas)" type="number" step="1" min="1" placeholder="Ej. 2" />
+          <Field name="estimated_time" label="Tiempo aproximado" type="number" step="1" min="1" placeholder="Ej. 90" />
+          <SelectField name="estimated_time_unit" label="Unidad del tiempo" options={[["minutes", "Minutos"], ["hours", "Horas"]]} defaultValue="hours" />
         </div>
         <TextareaField name="notes" label="Indicaciones" placeholder="Material, medida, acabado o cuidado especial..." />
       </section>
@@ -1787,10 +2061,10 @@ function TaskCreateForm({
             <strong>{wizard.review.title || "Sin titulo"}</strong>
             <small>{wizard.review.process_type || "Sin proceso"}</small>
           </div>
-          <ReviewItem label="Centro de costo" value={selectedCostCenter ? costCenterLabel(selectedCostCenter) : "Sin centro de costo"} />
+          <ReviewItem label="Centros de costo" value={selectedCostCenters.length ? selectedCostCenters.map(costCenterLabel).join(" · ") : (wizard.review.cost_center_code || "Sin centro de costo")} />
           <ReviewItem label="Responsables" value={selectedEmployeeNames.join(", ") || "Sin responsables"} />
           <ReviewItem label="Prioridad" value={selectedPriority || "Media"} />
-          <ReviewItem label="Tiempo aproximado" value={wizard.review.estimated_hours ? `${wizard.review.estimated_hours} h` : "Sin estimar"} />
+          <ReviewItem label="Tiempo aproximado" value={wizard.review.estimated_time ? `${wizard.review.estimated_time} ${wizard.review.estimated_time_unit === "minutes" ? "min" : "h"}` : "Sin estimar"} />
           <ReviewItem label="Subtareas" value={subtasks.length ? `${subtasks.length} agregada${subtasks.length === 1 ? "" : "s"}` : "Sin subtareas"} />
           <ReviewItem label="Archivos" value={totalFiles ? `${totalFiles} adjunto${totalFiles === 1 ? "" : "s"}` : "Sin adjuntos"} />
           {subtasks.length ? (
@@ -1804,6 +2078,7 @@ function TaskCreateForm({
                       .map((employeeId) => assignableEmployees.find((employee) => employee.id === employeeId)?.name)
                       .filter(Boolean)
                       .join(", ") || "Sin operarios asignados"}
+                    {subtask.costCenterCodes.length ? ` · CC ${subtask.costCenterCodes.join(", ")}` : ""}
                   </small>
                 </div>
               ))}
@@ -1863,6 +2138,75 @@ function AttachmentPicker({
               <small>{formatFileSize(file.size)}</small>
               <button type="button" aria-label={`Quitar ${file.name}`} onClick={() => onChange(files.filter((_, fileIndex) => fileIndex !== index))}>×</button>
             </span>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CostCenterMultiSelect({
+  label,
+  costCenters,
+  value,
+  onChange,
+  compact = false,
+}: {
+  label: string;
+  costCenters: CostCenterOption[];
+  value: string[];
+  onChange: (codes: string[]) => void;
+  compact?: boolean;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const normalizedQuery = normalizeSearchText(query);
+  const available = costCenters
+    .filter((costCenter) => !value.includes(costCenter.code))
+    .filter((costCenter) => !normalizedQuery || normalizeSearchText(costCenterLabel(costCenter)).includes(normalizedQuery))
+    .slice(0, 8);
+
+  function add(code: string) {
+    if (!value.includes(code)) onChange([...value, code]);
+    setQuery("");
+    setOpen(false);
+  }
+
+  return (
+    <div className={cn("cost-center-multi", compact && "cost-center-multi--compact")}>
+      <div className="cost-center-multi__heading">
+        <span className="label">{label}</span>
+        <small>{value.length ? `${value.length} seleccionado${value.length === 1 ? "" : "s"}` : "Opcional"}</small>
+      </div>
+      <div className="cost-center-multi__search" onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+      }}>
+        <input
+          type="text"
+          value={query}
+          role="combobox"
+          aria-expanded={open}
+          placeholder="Buscar codigo, cliente o nombre..."
+          onFocus={() => setOpen(true)}
+          onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
+        />
+        {open ? (
+          <div className="cost-center-multi__options" role="listbox">
+            {available.map((costCenter) => (
+              <button key={costCenter.code} type="button" onClick={() => add(costCenter.code)}>
+                <b>{costCenter.code}</b><span>{costCenter.name || costCenter.client_name || "Centro de costo"}</span>
+              </button>
+            ))}
+            {!available.length ? <small>Sin centros disponibles</small> : null}
+          </div>
+        ) : null}
+      </div>
+      {value.length ? (
+        <div className="cost-center-multi__chips">
+          {value.map((code) => (
+            <button key={code} type="button" onClick={() => onChange(value.filter((item) => item !== code))} title={`Quitar ${code}`}>
+              <span>{code}</span><b aria-hidden="true">×</b>
+            </button>
           ))}
         </div>
       ) : null}
@@ -2766,8 +3110,8 @@ function SelectField({
 
 function StatusBadge({ status }: { status: ProductionTaskStatus }) {
   const classes: Record<ProductionTaskStatus, string> = {
-    pendiente: "bg-amber-50 text-amber-800",
-    en_proceso: "bg-sky-50 text-sky-800",
+    pendiente: "bg-red-50 text-red-700",
+    en_proceso: "bg-amber-100 text-amber-900",
     pausada: "bg-neutral-100 text-neutral-700",
     bloqueada: "bg-red-50 text-red-700",
     terminada: "bg-emerald-50 text-emerald-800",
@@ -2798,6 +3142,10 @@ function EmptyState({ title, detail, compact }: { title: string; detail: string;
 
 function NewTaskBadge() {
   return <span className="new-task-badge"><i aria-hidden="true" />Nueva tarea</span>;
+}
+
+function PartialTaskBadge() {
+  return <span className="partial-task-badge">Inicio parcial</span>;
 }
 
 async function createProductionTaskWithUploads(submission: TaskCreateSubmission, performedById: string): Promise<string> {
@@ -2879,8 +3227,11 @@ function numberValue(formData: FormData, key: string): number {
 
 function formatEstimatedHours(minutes: number): string {
   if (!minutes || minutes <= 0) return "Sin estimar";
-  const hours = Math.round((minutes / 60) * 100) / 100;
-  return `${formatQuantity(hours)} h`;
+  const roundedMinutes = Math.round(minutes);
+  if (roundedMinutes < 60) return `${roundedMinutes} min`;
+  const hours = Math.floor(roundedMinutes / 60);
+  const remainingMinutes = roundedMinutes % 60;
+  return remainingMinutes ? `${hours} h ${remainingMinutes} min` : `${hours} h`;
 }
 
 function supplierLabel(supplier: Supplier): string {

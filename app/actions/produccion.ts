@@ -12,6 +12,8 @@ import type {
   ProductionMaterialBatchConsumptionInput,
   ProductionEmployeeOption,
   ProductionEmployeeRole,
+  ProductionCostCenterAssignment,
+  ProductionOvertimeSession,
   ProductionTask,
   ProductionTaskAttachment,
   ProductionTaskInput,
@@ -27,11 +29,12 @@ import type {
 type SupabaseError = { message?: string; code?: string; hint?: string | null; details?: string | null };
 const productionAttachmentsBucket = "production-task-attachments";
 const productionTaskDeleteCode = "TECONDOR2026";
+const bogotaUtcOffsetMs = 5 * 60 * 60 * 1000;
 
 export async function listProductionWorkspaceData(): Promise<ProductionWorkspaceData> {
   const supabase = await createClient();
 
-  const [itemsRes, tasksRes, subtasksRes, assignmentsRes, attachmentsRes, workSessionsRes, movementsRes, materialsRes, centersRes, suppliersRes, employeesRes] = await Promise.all([
+  const [itemsRes, tasksRes, subtasksRes, assignmentsRes, attachmentsRes, workSessionsRes, overtimeSessionsRes, taskCostCentersRes, subtaskCostCentersRes, movementsRes, materialsRes, centersRes, suppliersRes, employeesRes] = await Promise.all([
     supabase
       .from("inventory_items")
       .select("*, preferred_supplier:suppliers(*)")
@@ -63,6 +66,21 @@ export async function listProductionWorkspaceData(): Promise<ProductionWorkspace
       .select("*")
       .order("started_at", { ascending: false })
       .limit(10000),
+    supabase
+      .from("production_overtime_sessions")
+      .select("*")
+      .order("started_at", { ascending: false })
+      .limit(5000),
+    supabase
+      .from("production_task_cost_centers")
+      .select("*")
+      .order("position")
+      .limit(3000),
+    supabase
+      .from("production_subtask_cost_centers")
+      .select("*")
+      .order("position")
+      .limit(5000),
     supabase
       .from("inventory_movements")
       .select("*, item:inventory_items(*), task:production_tasks(*)")
@@ -99,6 +117,7 @@ export async function listProductionWorkspaceData(): Promise<ProductionWorkspace
       schemaReady: false,
       taskExtensionsReady: false,
       timeTrackingReady: false,
+      advancedPlanningReady: false,
       message: "Ejecuta la migracion de Inventario y Produccion en Supabase para activar este modulo.",
       items: [],
       tasks: [],
@@ -122,6 +141,10 @@ export async function listProductionWorkspaceData(): Promise<ProductionWorkspace
   if (workSessionsRes.error && !isMissingProductionSchema(workSessionsRes.error)) {
     throwSupabaseError("cargar el historial de tiempos", workSessionsRes.error);
   }
+  const planningErrors = [overtimeSessionsRes.error, taskCostCentersRes.error, subtaskCostCentersRes.error].filter(Boolean) as SupabaseError[];
+  const advancedPlanningReady = planningErrors.length === 0;
+  const unexpectedPlanningError = planningErrors.find((error) => !isMissingProductionSchema(error));
+  if (unexpectedPlanningError) throwSupabaseError("cargar centros de costo y horas extra", unexpectedPlanningError);
 
   const attachments = normalizeTaskAttachments(taskExtensionsReady ? attachmentsRes.data ?? [] : []);
   const attachmentPaths = attachments.map((attachment) => attachment.bucket_path);
@@ -137,14 +160,18 @@ export async function listProductionWorkspaceData(): Promise<ProductionWorkspace
 
   const assignments = normalizeSubtaskAssignments(taskExtensionsReady ? assignmentsRes.data ?? [] : []);
   const workSessions = normalizeWorkSessions(timeTrackingReady ? workSessionsRes.data ?? [] : []);
-  const subtasks = normalizeProductionSubtasks(taskExtensionsReady ? subtasksRes.data ?? [] : [], assignments, attachments, workSessions);
+  const overtimeSessions = normalizeOvertimeSessions(advancedPlanningReady ? overtimeSessionsRes.data ?? [] : []);
+  const taskCostCenters = normalizeCostCenterAssignments(advancedPlanningReady ? taskCostCentersRes.data ?? [] : []);
+  const subtaskCostCenters = normalizeCostCenterAssignments(advancedPlanningReady ? subtaskCostCentersRes.data ?? [] : []);
+  const subtasks = normalizeProductionSubtasks(taskExtensionsReady ? subtasksRes.data ?? [] : [], assignments, attachments, workSessions, subtaskCostCenters);
 
   return {
     schemaReady: true,
     taskExtensionsReady,
     timeTrackingReady,
+    advancedPlanningReady,
     items: normalizeInventoryItems(itemsRes.data ?? []),
-    tasks: normalizeProductionTasks(tasksRes.data ?? [], subtasks, attachments, workSessions),
+    tasks: normalizeProductionTasks(tasksRes.data ?? [], subtasks, attachments, workSessions, overtimeSessions, taskCostCenters),
     movements: normalizeInventoryMovements(movementsRes.data ?? []),
     task_materials: normalizeTaskMaterials(materialsRes.data ?? []),
     cost_centers: centersRes.error ? [] : normalizeCostCenters(centersRes.data ?? []),
@@ -281,6 +308,10 @@ export async function createProductionTask(input: ProductionTaskInput): Promise<
   const performedBy = await resolveTaskActor(supabase, input.performed_by, true);
   const title = clean(input.title);
   if (!title) throw new Error("Escribe el nombre de la tarea.");
+  const selectedCostCenters = uniqueCleanStrings([
+    ...(input.cost_center_codes ?? []),
+    input.cost_center_code,
+  ]).slice(0, 20);
 
   const { data: authData } = await supabase.auth.getUser();
   const user = authData.user;
@@ -290,7 +321,7 @@ export async function createProductionTask(input: ProductionTaskInput): Promise<
     .insert({
       title,
       process_type: clean(input.process_type) || "General",
-      cost_center_code: cleanNullable(input.cost_center_code),
+      cost_center_code: selectedCostCenters[0] ?? null,
       assigned_to: cleanNullable(input.assigned_to),
       priority: input.priority ?? "media",
       planned_quantity: Math.max(1, positiveNumber(input.planned_quantity) || 1),
@@ -308,6 +339,16 @@ export async function createProductionTask(input: ProductionTaskInput): Promise<
 
   const taskId = String(data.id);
   try {
+    if (selectedCostCenters.length) {
+      const { error: taskCentersError } = await supabase
+        .from("production_task_cost_centers")
+        .insert(selectedCostCenters.map((cost_center_code, position) => ({ task_id: taskId, cost_center_code, position })));
+      if (taskCentersError && (!isMissingProductionSchema(taskCentersError) || selectedCostCenters.length > 1)) {
+        if (isMissingProductionSchema(taskCentersError)) throw new Error("Ejecuta la nueva migracion de centros de costo multiples en Supabase.");
+        throwSupabaseError("asignar centros de costo a la tarea", taskCentersError);
+      }
+    }
+
     const subtaskInputs = (input.subtasks ?? [])
       .slice(0, 30)
       .map((subtask, position) => ({
@@ -350,6 +391,23 @@ export async function createProductionTask(input: ProductionTaskInput): Promise<
           .from("production_subtask_assignments")
           .insert(assignmentRows);
         if (assignmentsError) throwSupabaseError("asignar operarios a las subtareas", assignmentsError);
+      }
+
+      const subtaskCenterRows = subtaskInputs.flatMap((subtask) => {
+        const subtaskId = subtaskIdByPosition.get(subtask.position);
+        if (!subtaskId) return [];
+        return uniqueCleanStrings(subtask.input.cost_center_codes ?? [])
+          .slice(0, 20)
+          .map((cost_center_code, position) => ({ subtask_id: subtaskId, cost_center_code, position }));
+      });
+      if (subtaskCenterRows.length) {
+        const { error: subtaskCentersError } = await supabase
+          .from("production_subtask_cost_centers")
+          .insert(subtaskCenterRows);
+        if (subtaskCentersError) {
+          if (isMissingProductionSchema(subtaskCentersError)) throw new Error("Ejecuta la nueva migracion de centros de costo multiples en Supabase.");
+          throwSupabaseError("distribuir centros de costo en las subtareas", subtaskCentersError);
+        }
       }
     }
 
@@ -402,6 +460,8 @@ export async function updateProductionTaskStatus(id: string, status: ProductionT
   const performedBy = await resolveTaskActor(supabase, performedById, requiresSharedOperator);
   const cleanId = clean(id);
   if (!cleanId) throw new Error("No se encontro la tarea.");
+  const cleanNotes = clean(notes);
+  if (status === "pausada" && !cleanNotes) throw new Error("Escribe por que se pausa la tarea.");
 
   const { data: currentTask, error: currentTaskError } = await supabase
     .from("production_tasks")
@@ -437,10 +497,11 @@ export async function updateProductionTaskStatus(id: string, status: ProductionT
   if (status === "en_proceso") {
     await openWorkSession(supabase, cleanId, null, now, performedBy);
   } else if (["pausada", "terminada"].includes(status)) {
-    await closeWorkSessions(supabase, cleanId, null, now, status, performedBy);
+    const endReason = status === "pausada" ? `Pausa: ${cleanNotes}` : status;
+    await closeWorkSessions(supabase, cleanId, null, now, endReason, performedBy);
   }
 
-  await insertTaskEvent(supabase, cleanId, status, cleanNullable(notes), performedBy);
+  await insertTaskEvent(supabase, cleanId, status, cleanNullable(cleanNotes), performedBy);
   revalidatePath("/");
 }
 
@@ -474,11 +535,13 @@ export async function deleteProductionTask(id: string, authorizationCode: string
   revalidatePath("/");
 }
 
-export async function updateProductionSubtaskStatus(id: string, status: ProductionTaskStatus, performedById?: string): Promise<void> {
+export async function updateProductionSubtaskStatus(id: string, status: ProductionTaskStatus, performedById?: string, notes?: string | null): Promise<void> {
   const supabase = await createClient();
   const performedBy = await resolveTaskActor(supabase, performedById, true);
   const cleanId = clean(id);
   if (!cleanId) throw new Error("No se encontro la subtarea.");
+  const cleanNotes = clean(notes);
+  if (status === "pausada" && !cleanNotes) throw new Error("Escribe por que se pausa la subtarea.");
   if (!["pendiente", "en_proceso", "pausada", "terminada"].includes(status)) {
     throw new Error("Estado de subtarea no valido.");
   }
@@ -501,7 +564,8 @@ export async function updateProductionSubtaskStatus(id: string, status: Producti
   if (status === "en_proceso") {
     await openWorkSession(supabase, taskId, cleanId, now, performedBy);
   } else if (["pausada", "terminada"].includes(status)) {
-    await closeWorkSessions(supabase, taskId, cleanId, now, status, performedBy);
+    const endReason = status === "pausada" ? `Pausa: ${cleanNotes}` : status;
+    await closeWorkSessions(supabase, taskId, cleanId, now, endReason, performedBy);
   }
 
   const { data: siblingSubtasks, error: siblingsError } = await supabase
@@ -514,7 +578,16 @@ export async function updateProductionSubtaskStatus(id: string, status: Producti
   const allFinished = statuses.length > 0 && statuses.every((value) => value === "terminada");
   const anyInProgress = statuses.some((value) => value === "en_proceso");
   const anyPaused = statuses.some((value) => value === "pausada");
-  const taskStatus: ProductionTaskStatus = allFinished ? "terminada" : anyInProgress ? "en_proceso" : anyPaused ? "pausada" : "pendiente";
+  const anyStarted = statuses.some((value) => value !== "pendiente");
+  const taskStatus: ProductionTaskStatus = allFinished
+    ? "terminada"
+    : anyInProgress
+      ? "en_proceso"
+      : anyPaused
+        ? "pausada"
+        : anyStarted
+          ? "en_proceso"
+          : "pendiente";
   const { data: currentTask, error: currentTaskError } = await supabase
     .from("production_tasks")
     .select("status,started_at")
@@ -540,7 +613,93 @@ export async function updateProductionSubtaskStatus(id: string, status: Producti
     supabase,
     taskId,
     `subtarea_${status}`,
-    clean(String(subtask.title)) || null,
+    [clean(String(subtask.title)), cleanNotes].filter(Boolean).join(" · ") || null,
+    performedBy,
+  );
+  revalidatePath("/");
+}
+
+export async function recordProductionOvertime(taskId: string, subtaskId?: string | null, performedById?: string): Promise<void> {
+  const supabase = await createClient();
+  const performedBy = await resolveTaskActor(supabase, performedById, true);
+  const cleanTaskId = clean(taskId);
+  const cleanSubtaskId = cleanNullable(subtaskId);
+  if (!cleanTaskId) throw new Error("No se encontro la tarea.");
+
+  const { data: task, error: taskError } = await supabase
+    .from("production_tasks")
+    .select("id,task_number,title,status")
+    .eq("id", cleanTaskId)
+    .single();
+  if (taskError || !task) throwSupabaseError("consultar la tarea para horas extra", taskError ?? {});
+  if (["terminada", "revisada", "cancelada"].includes(String(task.status))) {
+    throw new Error("No se pueden iniciar horas extra en una tarea cerrada.");
+  }
+
+  if (cleanSubtaskId) {
+    const { data: subtask, error: subtaskError } = await supabase
+      .from("production_subtasks")
+      .select("id")
+      .eq("id", cleanSubtaskId)
+      .eq("task_id", cleanTaskId)
+      .single();
+    if (subtaskError || !subtask) throw new Error("La subtarea seleccionada no pertenece a esta tarea.");
+  }
+
+  const now = new Date();
+  const normalDeparture = initialOvertimeStart(now);
+  if (now.getTime() <= normalDeparture.getTime()) {
+    throw new Error("Las horas extra solo se pueden registrar despues de las 5:00 p. m.");
+  }
+  const [dayStart, dayEnd] = bogotaDayRange(now);
+  const { data: previousSession, error: previousError } = await supabase
+    .from("production_overtime_sessions")
+    .select("ended_at")
+    .eq("started_by", performedBy)
+    .not("ended_at", "is", null)
+    .gte("started_at", dayStart.toISOString())
+    .lt("started_at", dayEnd.toISOString())
+    .order("ended_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (previousError) {
+    if (isMissingProductionSchema(previousError)) throw new Error("Ejecuta la migracion de horas extra en Supabase.");
+    throwSupabaseError("consultar las horas extra anteriores", previousError);
+  }
+
+  const previousEndMs = Date.parse(String(previousSession?.ended_at || ""));
+  const startsAt = new Date(Number.isFinite(previousEndMs)
+    ? Math.max(normalDeparture.getTime(), previousEndMs)
+    : normalDeparture.getTime());
+  if (startsAt.getTime() >= now.getTime()) {
+    throw new Error("Esta persona ya registro sus horas extra hasta la hora actual.");
+  }
+  const nowIso = now.toISOString();
+  const { error } = await supabase.from("production_overtime_sessions").insert({
+    task_id: cleanTaskId,
+    subtask_id: cleanSubtaskId,
+    started_at: startsAt.toISOString(),
+    ended_at: nowIso,
+    started_by: performedBy,
+    ended_by: performedBy,
+    end_reason: "Horas extra registradas hasta la hora actual",
+    updated_at: nowIso,
+  });
+  if (error) {
+    if (isMissingProductionSchema(error)) throw new Error("Ejecuta la migracion de horas extra en Supabase.");
+    throwSupabaseError("registrar las horas extra", error);
+  }
+
+  const timeFormatter = new Intl.DateTimeFormat("es-CO", {
+    timeZone: "America/Bogota",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  await insertTaskEvent(
+    supabase,
+    cleanTaskId,
+    "horas_extra_registradas",
+    `${timeFormatter.format(startsAt)} a ${timeFormatter.format(now)}`,
     performedBy,
   );
   revalidatePath("/");
@@ -921,6 +1080,8 @@ function normalizeProductionTasks(
   subtasks: ProductionSubtask[] = [],
   attachments: ProductionTaskAttachment[] = [],
   workSessions: ProductionWorkSession[] = [],
+  overtimeSessions: ProductionOvertimeSession[] = [],
+  costCenterAssignments: ProductionCostCenterAssignment[] = [],
 ): ProductionTask[] {
   return rows.map((row) => {
     const value = row as ProductionTask;
@@ -933,6 +1094,11 @@ function normalizeProductionTasks(
       subtasks: subtasks.filter((subtask) => subtask.task_id === value.id),
       attachments: attachments.filter((attachment) => attachment.task_id === value.id && !attachment.subtask_id),
       work_sessions: workSessions.filter((session) => session.task_id === value.id && !session.subtask_id),
+      overtime_sessions: overtimeSessions.filter((session) => session.task_id === value.id),
+      cost_center_codes: uniqueCleanStrings([
+        ...costCenterAssignments.filter((assignment) => assignment.task_id === value.id).map((assignment) => assignment.cost_center_code),
+        value.cost_center_code,
+      ]),
     };
   });
 }
@@ -956,11 +1122,23 @@ function normalizeWorkSessions(rows: unknown[]): ProductionWorkSession[] {
   return rows.map((row) => row as ProductionWorkSession);
 }
 
+function normalizeOvertimeSessions(rows: unknown[]): ProductionOvertimeSession[] {
+  return rows.map((row) => row as ProductionOvertimeSession);
+}
+
+function normalizeCostCenterAssignments(rows: unknown[]): ProductionCostCenterAssignment[] {
+  return rows.map((row) => {
+    const value = row as ProductionCostCenterAssignment;
+    return { ...value, position: Number(value.position || 0) };
+  });
+}
+
 function normalizeProductionSubtasks(
   rows: unknown[],
   assignments: ProductionSubtaskAssignment[],
   attachments: ProductionTaskAttachment[],
   workSessions: ProductionWorkSession[],
+  costCenterAssignments: ProductionCostCenterAssignment[],
 ): ProductionSubtask[] {
   return rows.map((row) => {
     const value = row as ProductionSubtask;
@@ -970,6 +1148,9 @@ function normalizeProductionSubtasks(
       assignments: assignments.filter((assignment) => assignment.subtask_id === value.id),
       attachments: attachments.filter((attachment) => attachment.subtask_id === value.id),
       work_sessions: workSessions.filter((session) => session.subtask_id === value.id),
+      cost_center_codes: uniqueCleanStrings(costCenterAssignments
+        .filter((assignment) => assignment.subtask_id === value.id)
+        .map((assignment) => assignment.cost_center_code)),
     };
   });
 }
@@ -1048,6 +1229,31 @@ function clean(value: string | null | undefined): string {
 function cleanNullable(value: string | null | undefined): string | null {
   const trimmed = clean(value);
   return trimmed ? trimmed : null;
+}
+
+function uniqueCleanStrings(values: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(values.map((value) => clean(value)).filter(Boolean)));
+}
+
+function initialOvertimeStart(now: Date): Date {
+  const nowMs = now.getTime();
+  const localMs = nowMs - bogotaUtcOffsetMs;
+  const localDate = new Date(localMs);
+  const dayOfWeek = localDate.getUTCDay();
+  if (dayOfWeek === 0 || dayOfWeek === 6) return now;
+  const localDayStart = Date.UTC(localDate.getUTCFullYear(), localDate.getUTCMonth(), localDate.getUTCDate());
+  const shiftEndMs = localDayStart + (17 * 60 * 60 * 1000) + bogotaUtcOffsetMs;
+  return new Date(shiftEndMs);
+}
+
+function bogotaDayRange(value: Date): [Date, Date] {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const localMs = value.getTime() - bogotaUtcOffsetMs;
+  const localDayStart = Math.floor(localMs / dayMs) * dayMs;
+  return [
+    new Date(localDayStart + bogotaUtcOffsetMs),
+    new Date(localDayStart + dayMs + bogotaUtcOffsetMs),
+  ];
 }
 
 function validAttachmentRows(

@@ -60,6 +60,28 @@ export type ProductionWorkSession = {
   updated_at: string;
 };
 
+export type ProductionCostCenterAssignment = {
+  id: string;
+  task_id?: string;
+  subtask_id?: string;
+  cost_center_code: string;
+  position: number;
+  created_at: string;
+};
+
+export type ProductionOvertimeSession = {
+  id: string;
+  task_id: string;
+  subtask_id: string | null;
+  started_at: string;
+  ended_at: string | null;
+  started_by: string;
+  ended_by: string | null;
+  end_reason: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ProductionSubtask = {
   id: string;
   task_id: string;
@@ -72,6 +94,7 @@ export type ProductionSubtask = {
   assignments: ProductionSubtaskAssignment[];
   attachments: ProductionTaskAttachment[];
   work_sessions: ProductionWorkSession[];
+  cost_center_codes: string[];
 };
 
 export type InventoryItem = {
@@ -114,6 +137,8 @@ export type ProductionTask = {
   subtasks: ProductionSubtask[];
   attachments: ProductionTaskAttachment[];
   work_sessions: ProductionWorkSession[];
+  overtime_sessions: ProductionOvertimeSession[];
+  cost_center_codes: string[];
 };
 
 export type ProductionTaskMaterial = {
@@ -155,6 +180,7 @@ export type ProductionWorkspaceData = {
   schemaReady: boolean;
   taskExtensionsReady: boolean;
   timeTrackingReady: boolean;
+  advancedPlanningReady: boolean;
   message?: string;
   items: InventoryItem[];
   tasks: ProductionTask[];
@@ -195,6 +221,7 @@ export type ProductionTaskInput = {
   title: string;
   process_type: string;
   cost_center_code?: string | null;
+  cost_center_codes?: string[];
   assigned_to?: string | null;
   priority?: ProductionTaskPriority;
   planned_quantity?: number;
@@ -214,6 +241,7 @@ export type ProductionTaskAttachmentInput = {
 export type ProductionSubtaskInput = {
   title: string;
   notes?: string | null;
+  cost_center_codes?: string[];
   assigned_to?: Array<{
     employee_id: string;
     employee_name: string;
