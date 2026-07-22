@@ -166,6 +166,7 @@ export type ProductionWorkspaceData = {
 };
 
 export type InventoryItemInput = {
+  performed_by?: string;
   code?: string;
   name: string;
   category?: string;
@@ -178,6 +179,7 @@ export type InventoryItemInput = {
 };
 
 export type InventoryMovementInput = {
+  performed_by?: string;
   item_id: string;
   movement_type: InventoryMovementType;
   quantity: number;
@@ -191,6 +193,7 @@ export type InventoryMovementInput = {
 };
 
 export type ProductionTaskInput = {
+  performed_by?: string;
   title: string;
   process_type: string;
   cost_center_code?: string | null;
@@ -221,6 +224,7 @@ export type ProductionSubtaskInput = {
 };
 
 export type ProductionMaterialConsumptionInput = {
+  performed_by?: string;
   task_id: string;
   item_id: string;
   quantity: number;
@@ -228,6 +232,7 @@ export type ProductionMaterialConsumptionInput = {
 };
 
 export type ProductionMaterialBatchConsumptionInput = {
+  performed_by?: string;
   task_id: string;
   items: Array<{
     item_id: string;

@@ -15,20 +15,24 @@ const navigation: Array<{ id: AppSection; label: string }> = [
 
 export function AppHeader({
   email,
+  activeOperatorName,
   activeSection,
   primaryActionLabel,
   notificationCount,
   onSectionChange,
   onPrimaryAction,
   onNotificationsClick,
+  onChangeOperator,
 }: {
   email: string;
+  activeOperatorName: string;
   activeSection: AppSection;
   primaryActionLabel: string;
   notificationCount: number;
   onSectionChange: (section: AppSection) => void;
   onPrimaryAction: () => void;
   onNotificationsClick: () => void;
+  onChangeOperator: () => void;
 }) {
   const router = useRouter();
   return (
@@ -55,6 +59,10 @@ export function AppHeader({
           ))}
         </nav>
         <div className="plant-header__actions">
+          <button type="button" className="operator-button" onClick={onChangeOperator} title={`Registrando como ${activeOperatorName}`}>
+            <span>{operatorInitials(activeOperatorName)}</span>
+            <b><small>Registrando como</small>{activeOperatorName}</b>
+          </button>
           <PwaRegistration />
           <div className="notification-center">
             <button
@@ -92,4 +100,9 @@ export function AppHeader({
       </div>
     </header>
   );
+}
+
+function operatorInitials(value: string): string {
+  const words = String(value || "").trim().split(/\s+/).filter(Boolean);
+  return words.slice(0, 2).map((word) => word.charAt(0).toUpperCase()).join("") || "?";
 }

@@ -81,6 +81,8 @@ const statusLabels: Record<ProductionTaskStatus, string> = {
   cancelada: "Cancelada",
 };
 
+const activeOperatorStorageKey = "tecondor-production-active-operator";
+
 export function ProductionWorkspace({ data, email, userName }: { data: ProductionWorkspaceData; email: string; userName: string }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("tareas");
@@ -88,25 +90,39 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
   const [consumptionTaskId, setConsumptionTaskId] = useState("");
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [highlightedTaskId, setHighlightedTaskId] = useState("");
+  const [activeOperatorId, setActiveOperatorId] = useState("");
+  const [operatorPickerOpen, setOperatorPickerOpen] = useState(false);
+  const [operatorReady, setOperatorReady] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [isPending, startTransition] = useTransition();
   const knownNotificationIds = useRef<Set<string> | null>(null);
+  const activeOperator = data.employees.find((employee) => employee.id === activeOperatorId) ?? null;
+  const activeOperatorName = activeOperator?.name || userName;
+  const employeeIdentityKey = data.employees.map((employee) => employee.id).join("|");
 
   const visibleTasks = data.tasks.filter((task) => task.status !== "cancelada");
   const activeTasks = visibleTasks.filter((task) => !["terminada", "revisada"].includes(task.status));
   const taskNotifications = useMemo(() => data.tasks
-    .filter((task) => task.status === "terminada" && taskBelongsToUser(task, email, userName))
+    .filter((task) => task.status === "terminada" && taskBelongsToUser(task, email, activeOperatorName))
     .map((task) => ({
       id: task.id,
       title: `TP-${String(task.task_number || 0).padStart(4, "0")} · ${task.title}`,
       detail: `${task.assigned_to || "Operario"} termino esta tarea`,
-    })), [data.tasks, email, userName]);
+    })), [activeOperatorName, data.tasks, email]);
 
   useEffect(() => {
     if (!feedback || feedback.type === "info") return;
     const timeout = window.setTimeout(() => setFeedback(null), 4200);
     return () => window.clearTimeout(timeout);
   }, [feedback]);
+
+  useEffect(() => {
+    const storedId = window.localStorage.getItem(activeOperatorStorageKey) || "";
+    const validId = data.employees.some((employee) => employee.id === storedId) ? storedId : "";
+    setActiveOperatorId(validId);
+    setOperatorPickerOpen(!validId);
+    setOperatorReady(true);
+  }, [employeeIdentityKey, data.employees]);
 
   useEffect(() => {
     const refresh = () => router.refresh();
@@ -142,6 +158,10 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
   }
 
   function runPrimaryAction() {
+    if (!activeOperatorId) {
+      setOperatorPickerOpen(true);
+      return;
+    }
     if (activeTab === "inventario") {
       setModal("item");
       return;
@@ -165,6 +185,11 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
     success = "Listo. Cambios guardados.",
     onSuccess?: () => void,
   ) {
+    if (!activeOperatorId) {
+      setFeedback({ type: "error", text: "Selecciona quien esta usando la aplicacion." });
+      setOperatorPickerOpen(true);
+      return;
+    }
     startTransition(async () => {
       setFeedback({ type: "info", text: label });
       try {
@@ -186,12 +211,14 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
     <>
       <AppHeader
         email={email}
+        activeOperatorName={activeOperator?.name || "Seleccionar persona"}
         activeSection={activeTab}
         primaryActionLabel={primaryActionLabel}
         notificationCount={taskNotifications.length}
         onSectionChange={setActiveTab}
         onPrimaryAction={runPrimaryAction}
         onNotificationsClick={() => { setHighlightedTaskId(taskNotifications[0]?.id || ""); setActiveTab("tareas"); }}
+        onChangeOperator={() => setOperatorPickerOpen(true)}
       />
       <main className="production-main">
         <div className="production-workspace">
@@ -204,7 +231,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
               pending={isPending}
               onMovement={() => setModal("movement")}
               onEdit={(item) => { setEditingItem(item); setModal("edit-item"); }}
-              onDelete={(item) => runAction("Eliminando item...", () => archiveInventoryItem(item.id), "Item eliminado del inventario.")}
+              onDelete={(item) => runAction("Eliminando item...", () => archiveInventoryItem(item.id, activeOperatorId), "Item eliminado del inventario.")}
             />
           ) : null}
 
@@ -213,13 +240,13 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
               tasks={visibleTasks}
               pending={isPending}
               email={email}
-              userName={userName}
+              userName={activeOperatorName}
               highlightedTaskId={highlightedTaskId}
               timeTrackingReady={data.timeTrackingReady}
               onConsumeTask={openConsumption}
-              onStatus={(task, status) => runAction("Actualizando tarea...", () => updateProductionTaskStatus(task.id, status), "Tarea actualizada.")}
-              onSubtaskStatus={(subtask, status) => runAction("Actualizando subtarea...", () => updateProductionSubtaskStatus(subtask.id, status), "Subtarea actualizada.")}
-              onDelete={(task) => runAction("Eliminando tarea...", () => updateProductionTaskStatus(task.id, "cancelada", "Tarea eliminada del tablero"), "Tarea eliminada.")}
+              onStatus={(task, status) => runAction("Actualizando tarea...", () => updateProductionTaskStatus(task.id, status, null, activeOperatorId), "Tarea actualizada.")}
+              onSubtaskStatus={(subtask, status) => runAction("Actualizando subtarea...", () => updateProductionSubtaskStatus(subtask.id, status, activeOperatorId), "Subtarea actualizada.")}
+              onDelete={(task) => runAction("Eliminando tarea...", () => updateProductionTaskStatus(task.id, "cancelada", "Tarea eliminada del tablero", activeOperatorId), "Tarea eliminada.")}
             />
           ) : null}
 
@@ -252,7 +279,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
           onCancel={() => setModal(null)}
           onSubmit={(submission) => runAction(
             submission.fileCount ? "Subiendo adjuntos y creando tarea..." : "Creando tarea de produccion...",
-            () => createProductionTaskWithUploads(submission),
+            () => createProductionTaskWithUploads(submission, activeOperatorId),
             "Tarea creada.",
             () => { setModal(null); setActiveTab("tareas"); },
           )}
@@ -267,7 +294,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
           defaultTaskId={consumptionTaskId}
           pending={isPending}
           onCancel={() => setModal(null)}
-          onSubmit={(form) => runAction("Registrando materiales consumidos...", () => consumeProductionMaterials(form), `${form.items.length} consumo${form.items.length === 1 ? "" : "s"} registrado${form.items.length === 1 ? "" : "s"}.`, () => { setModal(null); setConsumptionTaskId(""); setActiveTab("consumos"); })}
+          onSubmit={(form) => runAction("Registrando materiales consumidos...", () => consumeProductionMaterials({ ...form, performed_by: activeOperatorId }), `${form.items.length} consumo${form.items.length === 1 ? "" : "s"} registrado${form.items.length === 1 ? "" : "s"}.`, () => { setModal(null); setConsumptionTaskId(""); setActiveTab("consumos"); })}
         />
       </WorkspaceModalPanel>
 
@@ -276,7 +303,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
           suppliers={data.suppliers}
           pending={isPending}
           onCancel={() => setModal(null)}
-          onSubmit={(form) => runAction("Creando item de inventario...", () => createInventoryItem(form), "Item creado.", () => { setModal(null); setActiveTab("inventario"); })}
+          onSubmit={(form) => runAction("Creando item de inventario...", () => createInventoryItem({ ...form, performed_by: activeOperatorId }), "Item creado.", () => { setModal(null); setActiveTab("inventario"); })}
         />
       </WorkspaceModalPanel>
 
@@ -287,7 +314,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
             suppliers={data.suppliers}
             pending={isPending}
             onCancel={() => { setModal(null); setEditingItem(null); }}
-            onSubmit={(form) => runAction("Actualizando item...", () => updateInventoryItem(editingItem.id, form), "Item actualizado.", () => { setModal(null); setEditingItem(null); setActiveTab("inventario"); })}
+            onSubmit={(form) => runAction("Actualizando item...", () => updateInventoryItem(editingItem.id, { ...form, performed_by: activeOperatorId }), "Item actualizado.", () => { setModal(null); setEditingItem(null); setActiveTab("inventario"); })}
           />
         ) : null}
       </WorkspaceModalPanel>
@@ -298,7 +325,26 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
           costCenters={data.cost_centers}
           pending={isPending}
           onCancel={() => setModal(null)}
-          onSubmit={(form) => runAction("Registrando movimiento de inventario...", () => createInventoryMovement(form), "Movimiento registrado.", () => { setModal(null); setActiveTab("inventario"); })}
+          onSubmit={(form) => runAction("Registrando movimiento de inventario...", () => createInventoryMovement({ ...form, performed_by: activeOperatorId }), "Movimiento registrado.", () => { setModal(null); setActiveTab("inventario"); })}
+        />
+      </WorkspaceModalPanel>
+
+      <WorkspaceModalPanel
+        open={operatorReady && operatorPickerOpen}
+        title="¿Quién está usando la app?"
+        detail="Esta selección quedará registrada en cada acción."
+        onClose={() => { if (activeOperatorId) setOperatorPickerOpen(false); }}
+        canClose={Boolean(activeOperatorId)}
+      >
+        <OperatorPicker
+          employees={data.employees}
+          activeOperatorId={activeOperatorId}
+          onSelect={(employee) => {
+            window.localStorage.setItem(activeOperatorStorageKey, employee.id);
+            setActiveOperatorId(employee.id);
+            setOperatorPickerOpen(false);
+            setFeedback({ type: "success", text: `Ahora registras como ${employee.name}.` });
+          }}
         />
       </WorkspaceModalPanel>
     </>
@@ -1059,6 +1105,7 @@ function WorkspaceModalPanel({
   title,
   detail,
   onClose,
+  canClose = true,
   wide,
   children,
 }: {
@@ -1066,6 +1113,7 @@ function WorkspaceModalPanel({
   title: string;
   detail: string;
   onClose: () => void;
+  canClose?: boolean;
   wide?: boolean;
   children: React.ReactNode;
 }) {
@@ -1078,7 +1126,7 @@ function WorkspaceModalPanel({
     }
     const previousOverflow = document.body.style.overflow;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && canClose) onClose();
     };
     document.body.style.overflow = "hidden";
     window.addEventListener("keydown", onKeyDown);
@@ -1086,14 +1134,14 @@ function WorkspaceModalPanel({
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [open, onClose]);
+  }, [canClose, open, onClose]);
 
   if (!open) return null;
 
   return (
     <div
       className={cn("workspace-modal", typing && "workspace-modal--typing")}
-      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
+      onMouseDown={(event) => { if (canClose && event.target === event.currentTarget) onClose(); }}
       onFocusCapture={(event) => {
         const target = event.target;
         const textInput = target instanceof HTMLInputElement && !["date", "checkbox", "radio", "hidden", "button", "submit"].includes(target.type);
@@ -1109,7 +1157,7 @@ function WorkspaceModalPanel({
         }, 0);
       }}
     >
-      <section className={cn("workspace-modal__panel", wide && "workspace-modal__panel--wide")} role="dialog" aria-modal="true" aria-label={title}>
+      <section className={cn("workspace-modal__panel", wide && "workspace-modal__panel--wide", !canClose && "workspace-modal__panel--required")} role="dialog" aria-modal="true" aria-label={title}>
         <header className="workspace-modal__header">
           <div>
             <span>Accion rapida</span>
@@ -1120,6 +1168,49 @@ function WorkspaceModalPanel({
         </header>
         <div className="workspace-modal__body">{children}</div>
       </section>
+    </div>
+  );
+}
+
+function OperatorPicker({
+  employees,
+  activeOperatorId,
+  onSelect,
+}: {
+  employees: ProductionEmployeeOption[];
+  activeOperatorId: string;
+  onSelect: (employee: ProductionEmployeeOption) => void;
+}) {
+  return (
+    <div className="operator-picker">
+      <div className="operator-picker__notice">
+        <strong>Cuenta compartida</strong>
+        <span>Elige tu nombre antes de trabajar. La aplicación recordará esta selección en este celular.</span>
+      </div>
+      {employees.length ? (
+        <div className="operator-picker__grid">
+          {employees.map((employee) => (
+            <button
+              key={employee.id}
+              type="button"
+              className={cn("operator-picker__person", employee.id === activeOperatorId && "is-active")}
+              onClick={() => onSelect(employee)}
+            >
+              <span>{employeeInitials(employee.name)}</span>
+              <div>
+                <strong>{employee.name}</strong>
+                <small>{employee.roles.includes("ingeniero") ? "Ingeniero" : "Operario"}</small>
+              </div>
+              {employee.id === activeOperatorId ? <b>Actual</b> : null}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="operator-picker__empty">
+          No hay operarios o ingenieros activos. Agrégalos en empleados antes de registrar acciones.
+        </div>
+      )}
+      <p>Si otra persona toma este celular, debe tocar su nombre en la barra superior antes de continuar.</p>
     </div>
   );
 }
@@ -2347,7 +2438,7 @@ function EmptyState({ title, detail, compact }: { title: string; detail: string;
   );
 }
 
-async function createProductionTaskWithUploads(submission: TaskCreateSubmission): Promise<string> {
+async function createProductionTaskWithUploads(submission: TaskCreateSubmission, performedById: string): Promise<string> {
   const supabase = createBrowserClient();
   const { data: authData } = await supabase.auth.getUser();
   const user = authData.user;
@@ -2387,6 +2478,7 @@ async function createProductionTaskWithUploads(submission: TaskCreateSubmission)
     }
     return await createProductionTask({
       ...submission.input,
+      performed_by: performedById,
       attachments: taskAttachments,
       subtasks,
     });
@@ -2443,15 +2535,22 @@ function createdByLabel(value: string | null): string {
   if (!raw) return "Sin registro";
   const localPart = raw.includes("@") ? raw.split("@")[0] : raw;
   return localPart
-    .split(/[._-]+/)
+    .split(/[\s._-]+/)
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
     .join(" ");
 }
 
+function employeeInitials(value: string): string {
+  const words = String(value || "").trim().split(/\s+/).filter(Boolean);
+  return words.slice(0, 2).map((word) => word.charAt(0).toUpperCase()).join("") || "?";
+}
+
 function taskBelongsToUser(task: ProductionTask, email: string, userName: string): boolean {
   const normalizedEmail = normalizeSearchText(email);
   if (normalizedEmail && normalizeSearchText(task.created_by || "") === normalizedEmail) return true;
+  const normalizedUserName = normalizeSearchText(userName);
+  if (normalizedUserName && normalizeSearchText(task.created_by || "") === normalizedUserName) return true;
 
   const assignedWords = new Set(normalizeSearchText(task.assigned_to || "").split(/[^a-z0-9]+/).filter(Boolean));
   const identityTokens = normalizeSearchText(`${userName} ${email.split("@")[0]}`)

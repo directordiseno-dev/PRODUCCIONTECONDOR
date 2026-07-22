@@ -154,6 +154,7 @@ export async function listProductionWorkspaceData(): Promise<ProductionWorkspace
 
 export async function createInventoryItem(input: InventoryItemInput): Promise<string> {
   const supabase = await createClient();
+  const performedBy = await resolvePerformerName(supabase, input.performed_by);
   const name = clean(input.name);
   if (!name) throw new Error("Escribe el nombre del item de inventario.");
 
@@ -192,7 +193,7 @@ export async function createInventoryItem(input: InventoryItemInput): Promise<st
       source_type: "inventario_inicial",
       notes: "Stock inicial",
       movement_date: todayInputValue(),
-      created_by: await currentUserEmail(supabase),
+      created_by: performedBy,
     });
   }
 
@@ -202,6 +203,7 @@ export async function createInventoryItem(input: InventoryItemInput): Promise<st
 
 export async function updateInventoryItem(id: string, input: InventoryItemInput): Promise<void> {
   const supabase = await createClient();
+  const performedBy = await resolvePerformerName(supabase, input.performed_by);
   const itemId = clean(id);
   const name = clean(input.name);
   if (!itemId) throw new Error("No se encontro el item de inventario.");
@@ -245,7 +247,7 @@ export async function updateInventoryItem(id: string, input: InventoryItemInput)
       source_id: itemId,
       notes: `Stock corregido de ${currentStock} a ${nextStock}`,
       movement_date: todayInputValue(),
-      created_by: await currentUserEmail(supabase),
+      created_by: performedBy,
     });
     if (movementError) throwSupabaseError("guardar el ajuste de stock", movementError);
   }
@@ -253,8 +255,9 @@ export async function updateInventoryItem(id: string, input: InventoryItemInput)
   revalidatePath("/");
 }
 
-export async function archiveInventoryItem(id: string): Promise<void> {
+export async function archiveInventoryItem(id: string, performedById: string): Promise<void> {
   const supabase = await createClient();
+  await resolvePerformerName(supabase, performedById);
   const itemId = clean(id);
   if (!itemId) throw new Error("No se encontro el item de inventario.");
 
@@ -268,18 +271,19 @@ export async function archiveInventoryItem(id: string): Promise<void> {
 
 export async function createInventoryMovement(input: InventoryMovementInput): Promise<string> {
   const supabase = await createClient();
-  return createInventoryMovementInternal(supabase, input, true);
+  const performedBy = await resolvePerformerName(supabase, input.performed_by);
+  return createInventoryMovementInternal(supabase, input, true, performedBy);
 }
 
 export async function createProductionTask(input: ProductionTaskInput): Promise<string> {
   const supabase = await createClient();
+  const performedBy = await resolvePerformerName(supabase, input.performed_by);
   const title = clean(input.title);
   if (!title) throw new Error("Escribe el nombre de la tarea.");
 
   const { data: authData } = await supabase.auth.getUser();
   const user = authData.user;
   if (!user) throw new Error("Tu sesion vencio. Vuelve a ingresar.");
-  const userEmail = user.email ?? null;
   const { data, error } = await supabase
     .from("production_tasks")
     .insert({
@@ -291,7 +295,7 @@ export async function createProductionTask(input: ProductionTaskInput): Promise<
       planned_quantity: Math.max(1, positiveNumber(input.planned_quantity) || 1),
       estimated_minutes: Math.max(0, Math.round(positiveNumber(input.estimated_minutes))),
       notes: cleanNullable(input.notes),
-      created_by: userEmail,
+      created_by: performedBy,
     })
     .select("id")
     .single();
@@ -353,7 +357,7 @@ export async function createProductionTask(input: ProductionTaskInput): Promise<
         ...attachment,
         task_id: taskId,
         subtask_id: null,
-        uploaded_by: userEmail,
+        uploaded_by: performedBy,
       })),
       ...subtaskInputs.flatMap((subtask) => {
         const subtaskId = subtaskIdByPosition.get(subtask.position);
@@ -362,7 +366,7 @@ export async function createProductionTask(input: ProductionTaskInput): Promise<
           ...attachment,
           task_id: taskId,
           subtask_id: subtaskId,
-          uploaded_by: userEmail,
+          uploaded_by: performedBy,
         }));
       }),
     ];
@@ -378,7 +382,7 @@ export async function createProductionTask(input: ProductionTaskInput): Promise<
       taskId,
       "creada",
       subtaskInputs.length ? `${subtaskInputs.length} subtarea${subtaskInputs.length === 1 ? "" : "s"}` : null,
-      userEmail,
+      performedBy,
     );
     revalidatePath("/");
     return taskId;
@@ -388,8 +392,9 @@ export async function createProductionTask(input: ProductionTaskInput): Promise<
   }
 }
 
-export async function updateProductionTaskStatus(id: string, status: ProductionTaskStatus, notes?: string | null): Promise<void> {
+export async function updateProductionTaskStatus(id: string, status: ProductionTaskStatus, notes?: string | null, performedById?: string): Promise<void> {
   const supabase = await createClient();
+  const performedBy = await resolvePerformerName(supabase, performedById);
   const cleanId = clean(id);
   if (!cleanId) throw new Error("No se encontro la tarea.");
 
@@ -424,20 +429,20 @@ export async function updateProductionTaskStatus(id: string, status: ProductionT
     throwSupabaseError("actualizar tarea de produccion", error);
   }
 
-  const userEmail = await currentUserEmail(supabase);
   if (status === "en_proceso") {
-    await openWorkSession(supabase, cleanId, null, now, userEmail);
+    await openWorkSession(supabase, cleanId, null, now, performedBy);
   } else if (["pausada", "terminada", "cancelada"].includes(status)) {
-    await closeWorkSessions(supabase, cleanId, null, now, status, userEmail);
-    if (status === "cancelada") await closeAllWorkSessionsForTask(supabase, cleanId, now, status, userEmail);
+    await closeWorkSessions(supabase, cleanId, null, now, status, performedBy);
+    if (status === "cancelada") await closeAllWorkSessionsForTask(supabase, cleanId, now, status, performedBy);
   }
 
-  await insertTaskEvent(supabase, cleanId, status, cleanNullable(notes), userEmail);
+  await insertTaskEvent(supabase, cleanId, status, cleanNullable(notes), performedBy);
   revalidatePath("/");
 }
 
-export async function updateProductionSubtaskStatus(id: string, status: ProductionTaskStatus): Promise<void> {
+export async function updateProductionSubtaskStatus(id: string, status: ProductionTaskStatus, performedById?: string): Promise<void> {
   const supabase = await createClient();
+  const performedBy = await resolvePerformerName(supabase, performedById);
   const cleanId = clean(id);
   if (!cleanId) throw new Error("No se encontro la subtarea.");
   if (!["pendiente", "en_proceso", "pausada", "terminada"].includes(status)) {
@@ -453,7 +458,6 @@ export async function updateProductionSubtaskStatus(id: string, status: Producti
 
   const taskId = String(subtask.task_id);
   const now = new Date().toISOString();
-  const userEmail = await currentUserEmail(supabase);
   const { error: updateSubtaskError } = await supabase
     .from("production_subtasks")
     .update({ status, updated_at: now })
@@ -461,9 +465,9 @@ export async function updateProductionSubtaskStatus(id: string, status: Producti
   if (updateSubtaskError) throwSupabaseError("actualizar la subtarea", updateSubtaskError);
 
   if (status === "en_proceso") {
-    await openWorkSession(supabase, taskId, cleanId, now, userEmail);
+    await openWorkSession(supabase, taskId, cleanId, now, performedBy);
   } else if (["pausada", "terminada"].includes(status)) {
-    await closeWorkSessions(supabase, taskId, cleanId, now, status, userEmail);
+    await closeWorkSessions(supabase, taskId, cleanId, now, status, performedBy);
   }
 
   const { data: siblingSubtasks, error: siblingsError } = await supabase
@@ -493,9 +497,9 @@ export async function updateProductionSubtaskStatus(id: string, status: Producti
   if (taskError) throwSupabaseError("actualizar el avance de la tarea", taskError);
 
   if (taskStatus === "en_proceso") {
-    await openWorkSession(supabase, taskId, null, now, userEmail);
+    await openWorkSession(supabase, taskId, null, now, performedBy);
   } else if (String(currentTask.status) === "en_proceso" || taskStatus === "terminada") {
-    await closeWorkSessions(supabase, taskId, null, now, taskStatus, userEmail);
+    await closeWorkSessions(supabase, taskId, null, now, taskStatus, performedBy);
   }
 
   await insertTaskEvent(
@@ -503,13 +507,14 @@ export async function updateProductionSubtaskStatus(id: string, status: Producti
     taskId,
     `subtarea_${status}`,
     clean(String(subtask.title)) || null,
-    userEmail,
+    performedBy,
   );
   revalidatePath("/");
 }
 
 export async function consumeProductionMaterial(input: ProductionMaterialConsumptionInput): Promise<string> {
   const movementIds = await consumeProductionMaterials({
+    performed_by: input.performed_by,
     task_id: input.task_id,
     items: [{ item_id: input.item_id, quantity: input.quantity }],
     notes: input.notes,
@@ -519,6 +524,7 @@ export async function consumeProductionMaterial(input: ProductionMaterialConsump
 
 export async function consumeProductionMaterials(input: ProductionMaterialBatchConsumptionInput): Promise<string[]> {
   const supabase = await createClient();
+  const performedBy = await resolvePerformerName(supabase, input.performed_by);
   const taskId = clean(input.task_id);
   if (!taskId) throw new Error("Selecciona la tarea.");
 
@@ -565,6 +571,7 @@ export async function consumeProductionMaterials(input: ProductionMaterialBatchC
       item,
       row.quantity,
       notes,
+      performedBy,
     ));
   }
 
@@ -573,7 +580,7 @@ export async function consumeProductionMaterials(input: ProductionMaterialBatchC
     taskId,
     "consumo_material",
     notes || `${rows.length} material${rows.length === 1 ? "" : "es"} registrado${rows.length === 1 ? "" : "s"}`,
-    await currentUserEmail(supabase),
+    performedBy,
   );
   revalidatePath("/");
   return movementIds;
@@ -585,6 +592,7 @@ async function recordProductionMaterialConsumption(
   item: InventoryItem,
   quantity: number,
   notes: string | null,
+  performedBy: string,
 ): Promise<string> {
   const taskId = clean(task.id);
   const itemId = clean(item.id);
@@ -602,6 +610,7 @@ async function recordProductionMaterialConsumption(
       movement_date: todayInputValue(),
     },
     false,
+    performedBy,
   );
 
   const { data: existing, error: existingError } = await supabase
@@ -642,6 +651,7 @@ async function createInventoryMovementInternal(
   supabase: Awaited<ReturnType<typeof createClient>>,
   input: InventoryMovementInput,
   shouldRevalidate: boolean,
+  performedBy: string,
 ): Promise<string> {
   const itemId = clean(input.item_id);
   const movementType = input.movement_type;
@@ -697,7 +707,7 @@ async function createInventoryMovementInternal(
       source_id: cleanNullable(input.source_id),
       notes: cleanNullable(input.notes),
       movement_date: clean(input.movement_date) || todayInputValue(),
-      created_by: await currentUserEmail(supabase),
+      created_by: performedBy,
     })
     .select("id")
     .single();
@@ -805,9 +815,29 @@ async function nextInventoryCode(supabase: Awaited<ReturnType<typeof createClien
   return `INV-${String((count ?? 0) + 1).padStart(4, "0")}`;
 }
 
-async function currentUserEmail(supabase: Awaited<ReturnType<typeof createClient>>): Promise<string | null> {
-  const { data } = await supabase.auth.getUser();
-  return data.user?.email ?? null;
+async function resolvePerformerName(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  performerId: string | null | undefined,
+): Promise<string> {
+  const cleanId = clean(performerId);
+  if (!cleanId) throw new Error("Selecciona quien esta usando la aplicacion.");
+
+  const { data, error } = await supabase
+    .from("payroll_employees")
+    .select("id,name,production_roles")
+    .eq("id", cleanId)
+    .eq("deleted", false)
+    .single();
+  if (error || !data) throw new Error("La persona seleccionada ya no esta disponible. Elige nuevamente quien usa la aplicacion.");
+
+  const roles = normalizeProductionRoles(data.production_roles);
+  if (!roles.some((role) => assignableProductionRoles.has(role))) {
+    throw new Error("Solo operarios e ingenieros pueden registrar acciones de produccion.");
+  }
+
+  const name = clean(data.name);
+  if (!name) throw new Error("La persona seleccionada no tiene un nombre valido.");
+  return name;
 }
 
 function normalizeInventoryItems(rows: unknown[]): InventoryItem[] {
