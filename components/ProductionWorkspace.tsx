@@ -28,6 +28,7 @@ import type {
   ProductionTaskStatus,
   ProductionSubtask,
   ProductionSubtaskInput,
+  ProductionWorkSession,
   ProductionWorkspaceData,
   Supplier,
 } from "@/lib/types";
@@ -214,6 +215,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
               email={email}
               userName={userName}
               highlightedTaskId={highlightedTaskId}
+              timeTrackingReady={data.timeTrackingReady}
               onConsumeTask={openConsumption}
               onStatus={(task, status) => runAction("Actualizando tarea...", () => updateProductionTaskStatus(task.id, status), "Tarea actualizada.")}
               onSubtaskStatus={(subtask, status) => runAction("Actualizando subtarea...", () => updateProductionSubtaskStatus(subtask.id, status), "Subtarea actualizada.")}
@@ -546,6 +548,7 @@ function TasksTab({
   email,
   userName,
   highlightedTaskId,
+  timeTrackingReady,
   onConsumeTask,
   onStatus,
   onSubtaskStatus,
@@ -556,6 +559,7 @@ function TasksTab({
   email: string;
   userName: string;
   highlightedTaskId: string;
+  timeTrackingReady: boolean;
   onConsumeTask: (taskId?: string) => void;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
   onSubtaskStatus: (subtask: ProductionSubtask, status: ProductionTaskStatus) => void;
@@ -615,6 +619,7 @@ function TasksTab({
               task={task}
               pending={pending}
               highlighted={task.id === highlightedTaskId}
+              timeTrackingReady={timeTrackingReady}
               onStatus={onStatus}
               onSubtaskStatus={onSubtaskStatus}
               onDelete={onDelete}
@@ -692,6 +697,7 @@ function TaskRow({
   task,
   pending,
   highlighted,
+  timeTrackingReady = false,
   onStatus,
   onSubtaskStatus = () => undefined,
   onDelete,
@@ -700,6 +706,7 @@ function TaskRow({
   task: ProductionTask;
   pending: boolean;
   highlighted?: boolean;
+  timeTrackingReady?: boolean;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
   onSubtaskStatus?: (subtask: ProductionSubtask, status: ProductionTaskStatus) => void;
   onDelete?: (task: ProductionTask) => void;
@@ -761,6 +768,9 @@ function TaskRow({
             </div>
           </details>
         ) : null}
+        {["terminada", "revisada"].includes(task.status) ? (
+          <TaskTimingSummary task={task} timeTrackingReady={timeTrackingReady} />
+        ) : null}
       </div>
       <div className="task-row__actions grid grid-cols-2 gap-2 md:min-w-[210px] md:flex md:flex-wrap md:justify-end">
         {onConsume && !["revisada", "cancelada"].includes(task.status) ? (
@@ -803,6 +813,137 @@ function TaskRow({
       </div>
     </div>
   );
+}
+
+function TaskTimingSummary({ task, timeTrackingReady }: { task: ProductionTask; timeTrackingReady: boolean }) {
+  if (!timeTrackingReady) {
+    return (
+      <div className="task-timing task-timing--pending">
+        El historial detallado de tiempos quedará disponible al activar la actualización de la base de datos.
+      </div>
+    );
+  }
+
+  const sessionStartTimes = task.work_sessions.map((session) => Date.parse(session.started_at)).filter(Number.isFinite);
+  const sessionEndTimes = task.work_sessions.map((session) => Date.parse(session.ended_at || "")).filter(Number.isFinite);
+  const startedAtMs = sessionStartTimes.length
+    ? Math.min(...sessionStartTimes)
+    : Date.parse(task.started_at || "");
+  const finishedAtMs = Number.isFinite(Date.parse(task.finished_at || ""))
+    ? Date.parse(task.finished_at || "")
+    : sessionEndTimes.length
+      ? Math.max(...sessionEndTimes)
+      : Number.NaN;
+  const activeMs = task.work_sessions.length
+    ? sumSessionDuration(task.work_sessions, finishedAtMs)
+    : Number.NaN;
+  const elapsedMs = Number.isFinite(startedAtMs) && Number.isFinite(finishedAtMs)
+    ? Math.max(0, finishedAtMs - startedAtMs)
+    : Number.NaN;
+  const pausedMs = Number.isFinite(activeMs) && Number.isFinite(elapsedMs)
+    ? Math.max(0, elapsedMs - activeMs)
+    : Number.NaN;
+  const estimatedMs = Math.max(0, task.estimated_minutes) * 60_000;
+  const varianceMs = Number.isFinite(activeMs) && estimatedMs > 0 ? activeMs - estimatedMs : Number.NaN;
+  const totalLabel = Number.isFinite(elapsedMs) ? formatWorkDuration(elapsedMs) : "Sin dato";
+  const lastClosedSession = task.work_sessions.reduce<ProductionWorkSession | null>((latest, session) => {
+    const endedAt = Date.parse(session.ended_at || "");
+    const latestEndedAt = Date.parse(latest?.ended_at || "");
+    if (!Number.isFinite(endedAt)) return latest;
+    return !latest || !Number.isFinite(latestEndedAt) || endedAt > latestEndedAt ? session : latest;
+  }, null);
+
+  return (
+    <details className="task-timing">
+      <summary>
+        <span>Historial de tiempos</span>
+        <small>Total transcurrido: <b>{totalLabel}</b></small>
+      </summary>
+      <div className="task-timing__body">
+        <div className="task-timing__metrics">
+          <TimingMetric label="Tiempo activo" value={formatWorkDuration(activeMs)} />
+          <TimingMetric label="Tiempo en pausa" value={formatWorkDuration(pausedMs)} />
+          <TimingMetric label="Duración total" value={totalLabel} />
+          <TimingMetric
+            label="Frente al estimado"
+            value={Number.isFinite(varianceMs)
+              ? varianceMs <= 0
+                ? `${formatWorkDuration(Math.abs(varianceMs))} antes`
+                : `${formatWorkDuration(varianceMs)} de más`
+              : "Sin comparación"}
+            tone={Number.isFinite(varianceMs) ? (varianceMs <= 0 ? "good" : "late") : undefined}
+          />
+        </div>
+        <div className="task-timing__dates">
+          <span><b>Inicio:</b> {formatWorkTimestamp(Number.isFinite(startedAtMs) ? startedAtMs : null)}</span>
+          <span><b>Terminación:</b> {formatWorkTimestamp(Number.isFinite(finishedAtMs) ? finishedAtMs : null)}</span>
+          {lastClosedSession?.ended_by ? <span><b>Cerrada por:</b> {createdByLabel(lastClosedSession.ended_by)}</span> : null}
+        </div>
+        {task.subtasks.length ? (
+          <div className="task-timing__subtasks">
+            <strong>Tiempo por subtarea</strong>
+            {task.subtasks.map((subtask) => {
+              const durationMs = subtask.work_sessions.length
+                ? sumSessionDuration(subtask.work_sessions, finishedAtMs)
+                : Number.NaN;
+              const people = subtask.assignments.map((assignment) => assignment.employee_name).join(", ");
+              return (
+                <div key={subtask.id} className="task-timing__subtask">
+                  <div>
+                    <b>{subtask.position + 1}. {subtask.title}</b>
+                    <small>{people || "Sin responsable"}</small>
+                  </div>
+                  <span>{formatWorkDuration(durationMs)}</span>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+        <p className="task-timing__note">El tiempo activo suma cada periodo entre Iniciar y Pausar o Terminar.</p>
+      </div>
+    </details>
+  );
+}
+
+function TimingMetric({ label, value, tone }: { label: string; value: string; tone?: "good" | "late" }) {
+  return (
+    <div className={cn("task-timing__metric", tone && `task-timing__metric--${tone}`)}>
+      <span>{label}</span>
+      <b>{value}</b>
+    </div>
+  );
+}
+
+function sumSessionDuration(sessions: ProductionWorkSession[], fallbackEndMs: number): number {
+  return sessions.reduce((total, session) => {
+    const startMs = Date.parse(session.started_at);
+    const explicitEndMs = Date.parse(session.ended_at || "");
+    const endMs = Number.isFinite(explicitEndMs) ? explicitEndMs : fallbackEndMs;
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return total;
+    return total + (endMs - startMs);
+  }, 0);
+}
+
+function formatWorkDuration(milliseconds: number): string {
+  if (!Number.isFinite(milliseconds)) return "Sin detalle";
+  const totalMinutes = Math.max(0, Math.round(milliseconds / 60_000));
+  if (totalMinutes < 1) return "< 1 min";
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (!hours) return `${minutes} min`;
+  return minutes ? `${hours} h ${minutes} min` : `${hours} h`;
+}
+
+function formatWorkTimestamp(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "Sin dato";
+  return new Intl.DateTimeFormat("es-CO", {
+    timeZone: "America/Bogota",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
 }
 
 function SubtaskRow({

@@ -19,6 +19,7 @@ import type {
   ProductionTaskStatus,
   ProductionSubtask,
   ProductionSubtaskAssignment,
+  ProductionWorkSession,
   ProductionWorkspaceData,
   Supplier,
 } from "@/lib/types";
@@ -29,7 +30,7 @@ const productionAttachmentsBucket = "production-task-attachments";
 export async function listProductionWorkspaceData(): Promise<ProductionWorkspaceData> {
   const supabase = await createClient();
 
-  const [itemsRes, tasksRes, subtasksRes, assignmentsRes, attachmentsRes, movementsRes, materialsRes, centersRes, suppliersRes, employeesRes] = await Promise.all([
+  const [itemsRes, tasksRes, subtasksRes, assignmentsRes, attachmentsRes, workSessionsRes, movementsRes, materialsRes, centersRes, suppliersRes, employeesRes] = await Promise.all([
     supabase
       .from("inventory_items")
       .select("*, preferred_supplier:suppliers(*)")
@@ -56,6 +57,11 @@ export async function listProductionWorkspaceData(): Promise<ProductionWorkspace
       .select("*")
       .order("created_at")
       .limit(1000),
+    supabase
+      .from("production_work_sessions")
+      .select("*")
+      .order("started_at", { ascending: false })
+      .limit(3000),
     supabase
       .from("inventory_movements")
       .select("*, item:inventory_items(*), task:production_tasks(*)")
@@ -91,6 +97,7 @@ export async function listProductionWorkspaceData(): Promise<ProductionWorkspace
     return {
       schemaReady: false,
       taskExtensionsReady: false,
+      timeTrackingReady: false,
       message: "Ejecuta la migracion de Inventario y Produccion en Supabase para activar este modulo.",
       items: [],
       tasks: [],
@@ -110,6 +117,10 @@ export async function listProductionWorkspaceData(): Promise<ProductionWorkspace
   const taskExtensionsReady = extensionErrors.length === 0;
   const unexpectedExtensionError = extensionErrors.find((error) => !isMissingProductionSchema(error));
   if (unexpectedExtensionError) throwSupabaseError("cargar subtareas y adjuntos", unexpectedExtensionError);
+  const timeTrackingReady = !workSessionsRes.error;
+  if (workSessionsRes.error && !isMissingProductionSchema(workSessionsRes.error)) {
+    throwSupabaseError("cargar el historial de tiempos", workSessionsRes.error);
+  }
 
   const attachments = normalizeTaskAttachments(taskExtensionsReady ? attachmentsRes.data ?? [] : []);
   const attachmentPaths = attachments.map((attachment) => attachment.bucket_path);
@@ -124,13 +135,15 @@ export async function listProductionWorkspaceData(): Promise<ProductionWorkspace
   }
 
   const assignments = normalizeSubtaskAssignments(taskExtensionsReady ? assignmentsRes.data ?? [] : []);
-  const subtasks = normalizeProductionSubtasks(taskExtensionsReady ? subtasksRes.data ?? [] : [], assignments, attachments);
+  const workSessions = normalizeWorkSessions(timeTrackingReady ? workSessionsRes.data ?? [] : []);
+  const subtasks = normalizeProductionSubtasks(taskExtensionsReady ? subtasksRes.data ?? [] : [], assignments, attachments, workSessions);
 
   return {
     schemaReady: true,
     taskExtensionsReady,
+    timeTrackingReady,
     items: normalizeInventoryItems(itemsRes.data ?? []),
-    tasks: normalizeProductionTasks(tasksRes.data ?? [], subtasks, attachments),
+    tasks: normalizeProductionTasks(tasksRes.data ?? [], subtasks, attachments, workSessions),
     movements: normalizeInventoryMovements(movementsRes.data ?? []),
     task_materials: normalizeTaskMaterials(materialsRes.data ?? []),
     cost_centers: centersRes.error ? [] : normalizeCostCenters(centersRes.data ?? []),
@@ -380,6 +393,13 @@ export async function updateProductionTaskStatus(id: string, status: ProductionT
   const cleanId = clean(id);
   if (!cleanId) throw new Error("No se encontro la tarea.");
 
+  const { data: currentTask, error: currentTaskError } = await supabase
+    .from("production_tasks")
+    .select("status,started_at")
+    .eq("id", cleanId)
+    .single();
+  if (currentTaskError || !currentTask) throwSupabaseError("consultar la tarea de produccion", currentTaskError ?? {});
+
   if (status === "terminada") {
     const { data: subtasks, error: subtasksError } = await supabase
       .from("production_subtasks")
@@ -393,7 +413,7 @@ export async function updateProductionTaskStatus(id: string, status: ProductionT
 
   const now = new Date().toISOString();
   const patch: Record<string, unknown> = { status, updated_at: now };
-  if (status === "en_proceso") patch.started_at = now;
+  if (status === "en_proceso" && !currentTask.started_at) patch.started_at = now;
   if (status === "pausada") patch.paused_at = now;
   if (status === "terminada") patch.finished_at = now;
   if (status === "revisada") patch.reviewed_at = now;
@@ -404,7 +424,15 @@ export async function updateProductionTaskStatus(id: string, status: ProductionT
     throwSupabaseError("actualizar tarea de produccion", error);
   }
 
-  await insertTaskEvent(supabase, cleanId, status, cleanNullable(notes), await currentUserEmail(supabase));
+  const userEmail = await currentUserEmail(supabase);
+  if (status === "en_proceso") {
+    await openWorkSession(supabase, cleanId, null, now, userEmail);
+  } else if (["pausada", "terminada", "cancelada"].includes(status)) {
+    await closeWorkSessions(supabase, cleanId, null, now, status, userEmail);
+    if (status === "cancelada") await closeAllWorkSessionsForTask(supabase, cleanId, now, status, userEmail);
+  }
+
+  await insertTaskEvent(supabase, cleanId, status, cleanNullable(notes), userEmail);
   revalidatePath("/");
 }
 
@@ -418,13 +446,26 @@ export async function updateProductionSubtaskStatus(id: string, status: Producti
 
   const { data: subtask, error: subtaskError } = await supabase
     .from("production_subtasks")
-    .update({ status, updated_at: new Date().toISOString() })
+    .select("task_id,title,status")
     .eq("id", cleanId)
-    .select("task_id,title")
     .single();
-  if (subtaskError || !subtask) throwSupabaseError("actualizar la subtarea", subtaskError ?? {});
+  if (subtaskError || !subtask) throwSupabaseError("consultar la subtarea", subtaskError ?? {});
 
   const taskId = String(subtask.task_id);
+  const now = new Date().toISOString();
+  const userEmail = await currentUserEmail(supabase);
+  const { error: updateSubtaskError } = await supabase
+    .from("production_subtasks")
+    .update({ status, updated_at: now })
+    .eq("id", cleanId);
+  if (updateSubtaskError) throwSupabaseError("actualizar la subtarea", updateSubtaskError);
+
+  if (status === "en_proceso") {
+    await openWorkSession(supabase, taskId, cleanId, now, userEmail);
+  } else if (["pausada", "terminada"].includes(status)) {
+    await closeWorkSessions(supabase, taskId, cleanId, now, status, userEmail);
+  }
+
   const { data: siblingSubtasks, error: siblingsError } = await supabase
     .from("production_subtasks")
     .select("status")
@@ -433,23 +474,36 @@ export async function updateProductionSubtaskStatus(id: string, status: Producti
 
   const statuses = (siblingSubtasks ?? []).map((row) => String(row.status));
   const allFinished = statuses.length > 0 && statuses.every((value) => value === "terminada");
-  const anyStarted = statuses.some((value) => ["en_proceso", "terminada"].includes(value));
-  const allPaused = statuses.length > 0 && statuses.every((value) => ["pausada", "terminada"].includes(value));
-  const taskStatus: ProductionTaskStatus = allFinished ? "terminada" : anyStarted ? "en_proceso" : allPaused ? "pausada" : "pendiente";
-  const now = new Date().toISOString();
+  const anyInProgress = statuses.some((value) => value === "en_proceso");
+  const anyPaused = statuses.some((value) => value === "pausada");
+  const taskStatus: ProductionTaskStatus = allFinished ? "terminada" : anyInProgress ? "en_proceso" : anyPaused ? "pausada" : "pendiente";
+  const { data: currentTask, error: currentTaskError } = await supabase
+    .from("production_tasks")
+    .select("status,started_at")
+    .eq("id", taskId)
+    .single();
+  if (currentTaskError || !currentTask) throwSupabaseError("consultar el avance de la tarea", currentTaskError ?? {});
+
   const taskPatch: Record<string, unknown> = { status: taskStatus, updated_at: now };
-  if (taskStatus === "en_proceso") taskPatch.started_at = now;
+  if (taskStatus === "en_proceso" && !currentTask.started_at) taskPatch.started_at = now;
   if (taskStatus === "pausada") taskPatch.paused_at = now;
   if (taskStatus === "terminada") taskPatch.finished_at = now;
 
   const { error: taskError } = await supabase.from("production_tasks").update(taskPatch).eq("id", taskId);
   if (taskError) throwSupabaseError("actualizar el avance de la tarea", taskError);
+
+  if (taskStatus === "en_proceso") {
+    await openWorkSession(supabase, taskId, null, now, userEmail);
+  } else if (String(currentTask.status) === "en_proceso" || taskStatus === "terminada") {
+    await closeWorkSessions(supabase, taskId, null, now, taskStatus, userEmail);
+  }
+
   await insertTaskEvent(
     supabase,
     taskId,
     `subtarea_${status}`,
     clean(String(subtask.title)) || null,
-    await currentUserEmail(supabase),
+    userEmail,
   );
   revalidatePath("/");
 }
@@ -669,6 +723,80 @@ async function insertTaskEvent(
   if (error && !isMissingProductionSchema(error)) throwSupabaseError("guardar evento de produccion", error);
 }
 
+async function openWorkSession(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  taskId: string,
+  subtaskId: string | null,
+  startedAt: string,
+  userEmail: string | null,
+): Promise<void> {
+  let openQuery = supabase
+    .from("production_work_sessions")
+    .select("id")
+    .eq("task_id", taskId)
+    .is("ended_at", null);
+  openQuery = subtaskId ? openQuery.eq("subtask_id", subtaskId) : openQuery.is("subtask_id", null);
+  const { data: openSession, error: openError } = await openQuery.maybeSingle();
+  if (openError) {
+    if (isMissingProductionSchema(openError)) return;
+    throwSupabaseError("consultar el historial de tiempos", openError);
+  }
+  if (openSession) return;
+
+  const { error } = await supabase.from("production_work_sessions").insert({
+    task_id: taskId,
+    subtask_id: subtaskId,
+    started_at: startedAt,
+    started_by: userEmail,
+  });
+  if (error && error.code !== "23505" && !isMissingProductionSchema(error)) {
+    throwSupabaseError("iniciar el registro de tiempo", error);
+  }
+}
+
+async function closeWorkSessions(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  taskId: string,
+  subtaskId: string | null,
+  endedAt: string,
+  reason: string,
+  userEmail: string | null,
+): Promise<void> {
+  let closeQuery = supabase
+    .from("production_work_sessions")
+    .update({
+      ended_at: endedAt,
+      end_reason: reason,
+      ended_by: userEmail,
+      updated_at: endedAt,
+    })
+    .eq("task_id", taskId)
+    .is("ended_at", null);
+  closeQuery = subtaskId ? closeQuery.eq("subtask_id", subtaskId) : closeQuery.is("subtask_id", null);
+  const { error } = await closeQuery;
+  if (error && !isMissingProductionSchema(error)) throwSupabaseError("cerrar el registro de tiempo", error);
+}
+
+async function closeAllWorkSessionsForTask(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  taskId: string,
+  endedAt: string,
+  reason: string,
+  userEmail: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from("production_work_sessions")
+    .update({
+      ended_at: endedAt,
+      end_reason: reason,
+      ended_by: userEmail,
+      updated_at: endedAt,
+    })
+    .eq("task_id", taskId)
+    .is("ended_at", null);
+  if (error && !isMissingProductionSchema(error)) throwSupabaseError("cerrar el historial de la tarea", error);
+}
+
 async function nextInventoryCode(supabase: Awaited<ReturnType<typeof createClient>>): Promise<string> {
   const { count, error } = await supabase
     .from("inventory_items")
@@ -698,6 +826,7 @@ function normalizeProductionTasks(
   rows: unknown[],
   subtasks: ProductionSubtask[] = [],
   attachments: ProductionTaskAttachment[] = [],
+  workSessions: ProductionWorkSession[] = [],
 ): ProductionTask[] {
   return rows.map((row) => {
     const value = row as ProductionTask;
@@ -709,6 +838,7 @@ function normalizeProductionTasks(
       estimated_minutes: Number(value.estimated_minutes || 0),
       subtasks: subtasks.filter((subtask) => subtask.task_id === value.id),
       attachments: attachments.filter((attachment) => attachment.task_id === value.id && !attachment.subtask_id),
+      work_sessions: workSessions.filter((session) => session.task_id === value.id && !session.subtask_id),
     };
   });
 }
@@ -728,10 +858,15 @@ function normalizeSubtaskAssignments(rows: unknown[]): ProductionSubtaskAssignme
   return rows.map((row) => row as ProductionSubtaskAssignment);
 }
 
+function normalizeWorkSessions(rows: unknown[]): ProductionWorkSession[] {
+  return rows.map((row) => row as ProductionWorkSession);
+}
+
 function normalizeProductionSubtasks(
   rows: unknown[],
   assignments: ProductionSubtaskAssignment[],
   attachments: ProductionTaskAttachment[],
+  workSessions: ProductionWorkSession[],
 ): ProductionSubtask[] {
   return rows.map((row) => {
     const value = row as ProductionSubtask;
@@ -740,6 +875,7 @@ function normalizeProductionSubtasks(
       position: Number(value.position || 0),
       assignments: assignments.filter((assignment) => assignment.subtask_id === value.id),
       attachments: attachments.filter((attachment) => attachment.subtask_id === value.id),
+      work_sessions: workSessions.filter((session) => session.subtask_id === value.id),
     };
   });
 }
@@ -878,7 +1014,8 @@ function isMissingProductionSchema(error: SupabaseError): boolean {
     message.includes("production_task_events") ||
     message.includes("production_subtasks") ||
     message.includes("production_subtask_assignments") ||
-    message.includes("production_task_attachments")
+    message.includes("production_task_attachments") ||
+    message.includes("production_work_sessions")
   );
 }
 

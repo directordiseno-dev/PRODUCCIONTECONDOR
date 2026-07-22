@@ -372,6 +372,31 @@ button { touch-action: manipulation; }
 .subtask-row__main > p { margin: 5px 0; color: #71717a; font-size: 10px; }
 .subtask-row__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
 .subtask-row__actions button { min-height: 34px; padding: 5px 9px; font-size: 10px; }
+.task-timing { margin-top: 9px; overflow: hidden; border: 1px solid #a7f3d0; border-radius: 12px; background: rgba(240,253,244,.9); }
+.task-timing > summary { display: flex; min-height: 42px; cursor: pointer; list-style: none; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 11px; color: #065f46; }
+.task-timing > summary::-webkit-details-marker { display: none; }
+.task-timing > summary span { font-size: 12px; font-weight: 950; }
+.task-timing > summary small { color: #047857; font-size: 10px; font-weight: 700; text-align: right; }
+.task-timing > summary small b { font-weight: 950; }
+.task-timing--pending { padding: 9px 11px; border-color: #fde68a; background: #fffbeb; color: #92400e; font-size: 10px; font-weight: 750; }
+.task-timing__body { display: grid; gap: 8px; border-top: 1px solid #bbf7d0; padding: 9px; }
+.task-timing__metrics { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 6px; }
+.task-timing__metric { min-width: 0; border: 1px solid #d1fae5; border-radius: 9px; background: #fff; padding: 7px 8px; }
+.task-timing__metric span { display: block; overflow: hidden; color: #6b7280; font-size: 8px; font-weight: 900; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.task-timing__metric b { display: block; margin-top: 2px; color: #18181b; font-size: 12px; font-weight: 950; }
+.task-timing__metric--good b { color: #047857; }
+.task-timing__metric--late { border-color: #fecaca; background: #fff7f7; }
+.task-timing__metric--late b { color: #b91c1c; }
+.task-timing__dates { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px 14px; color: #52525b; font-size: 9px; }
+.task-timing__subtasks { display: grid; gap: 5px; border-top: 1px solid #d1fae5; padding-top: 7px; }
+.task-timing__subtasks > strong { color: #065f46; font-size: 10px; text-transform: uppercase; }
+.task-timing__subtask { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 8px; border-radius: 8px; background: #fff; padding: 6px 8px; }
+.task-timing__subtask div { min-width: 0; }
+.task-timing__subtask b, .task-timing__subtask small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.task-timing__subtask b { color: #27272a; font-size: 10px; }
+.task-timing__subtask small { margin-top: 2px; color: #71717a; font-size: 8px; }
+.task-timing__subtask > span { border-radius: 999px; background: #d1fae5; padding: 4px 7px; color: #065f46; font-size: 9px; font-weight: 950; white-space: nowrap; }
+.task-timing__note { margin: 0; color: #6b7280; font-size: 8px; }
 
 @media (min-width: 768px) {
   .task-row__actions > button { width: auto; }
@@ -778,6 +803,9 @@ button { touch-action: manipulation; }
   .subtask-row { grid-template-columns: 1fr; }
   .subtask-row__actions { justify-content: stretch; }
   .subtask-row__actions button { flex: 1; }
+  .task-timing__metrics { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .task-timing > summary { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .task-timing > summary small { text-align: left; }
   .attachment-links a,
   .attachment-links__unavailable { max-width: 100%; }
 }

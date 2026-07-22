@@ -47,6 +47,19 @@ export type ProductionSubtaskAssignment = {
   created_at: string;
 };
 
+export type ProductionWorkSession = {
+  id: string;
+  task_id: string;
+  subtask_id: string | null;
+  started_at: string;
+  ended_at: string | null;
+  end_reason: string | null;
+  started_by: string | null;
+  ended_by: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ProductionSubtask = {
   id: string;
   task_id: string;
@@ -58,6 +71,7 @@ export type ProductionSubtask = {
   updated_at: string;
   assignments: ProductionSubtaskAssignment[];
   attachments: ProductionTaskAttachment[];
+  work_sessions: ProductionWorkSession[];
 };
 
 export type InventoryItem = {
@@ -99,6 +113,7 @@ export type ProductionTask = {
   updated_at: string;
   subtasks: ProductionSubtask[];
   attachments: ProductionTaskAttachment[];
+  work_sessions: ProductionWorkSession[];
 };
 
 export type ProductionTaskMaterial = {
@@ -139,6 +154,7 @@ export type ProductionEmployeeOption = { id: string; name: string; roles: Produc
 export type ProductionWorkspaceData = {
   schemaReady: boolean;
   taskExtensionsReady: boolean;
+  timeTrackingReady: boolean;
   message?: string;
   items: InventoryItem[];
   tasks: ProductionTask[];
