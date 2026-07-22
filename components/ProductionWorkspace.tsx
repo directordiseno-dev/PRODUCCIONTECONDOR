@@ -870,7 +870,7 @@ function TaskRow({
           <PriorityBadge priority={task.priority} />
           {task.cost_center_code ? <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-bold text-neutral-600">{task.cost_center_code}</span> : null}
         </div>
-        <div className="mt-2 text-lg font-black leading-tight text-neutral-950">{task.title}</div>
+        <div className="task-row__title mt-2 text-lg font-black leading-tight text-neutral-950">{task.title}</div>
         <div className="task-row__facts mt-2 grid grid-cols-2 gap-2 text-xs text-neutral-600 lg:grid-cols-4">
           <TaskFact label="Creada por" value={createdByLabel(task.created_by)} />
           <TaskFact label="Responsable" value={task.assigned_to || "Sin responsable"} />
