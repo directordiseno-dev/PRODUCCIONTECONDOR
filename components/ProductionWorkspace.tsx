@@ -760,8 +760,8 @@ function TasksTab({
     </div>
     <WorkspaceModalPanel
       open={Boolean(selectedTask)}
-      title={selectedTask ? `TP-${String(selectedTask.task_number || 0).padStart(4, "0")} · ${selectedTask.title}` : "Detalle de tarea"}
-      detail="Subtareas, responsables, tiempos y acciones de la tarea."
+      eyebrow={selectedTask ? `Tarea TP-${String(selectedTask.task_number || 0).padStart(4, "0")}` : "Tarea"}
+      title={selectedTask?.title || "Detalle de tarea"}
       onClose={() => setSelectedTaskId("")}
       wide
     >
@@ -769,6 +769,7 @@ function TasksTab({
         <TaskRow
           task={selectedTask}
           pending={pending}
+          detailMode
           timeTrackingReady={timeTrackingReady}
           onStatus={onStatus}
           onSubtaskStatus={onSubtaskStatus}
@@ -907,6 +908,7 @@ function TaskRow({
   task,
   pending,
   highlighted,
+  detailMode = false,
   timeTrackingReady = false,
   onStatus,
   onSubtaskStatus = () => undefined,
@@ -916,6 +918,7 @@ function TaskRow({
   task: ProductionTask;
   pending: boolean;
   highlighted?: boolean;
+  detailMode?: boolean;
   timeTrackingReady?: boolean;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
   onSubtaskStatus?: (subtask: ProductionSubtask, status: ProductionTaskStatus) => void;
@@ -940,22 +943,44 @@ function TaskRow({
     revisada: "bg-fuchsia-50/60 border-fuchsia-200",
     cancelada: "bg-neutral-50 border-neutral-200 opacity-70",
   };
+  const taskResponsibleNames = (task.assigned_to || "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
   return (
-    <div id={`task-${task.id}`} className={cn("task-row grid gap-3 rounded-2xl border border-l-4 px-3 py-3 shadow-sm transition hover:shadow-md sm:px-4 sm:py-4 md:grid-cols-[1fr_auto] md:items-center", statusAccent[task.status], statusSurface[task.status], highlighted && "task-row--highlighted")}>
+    <div id={`task-${task.id}`} className={cn("task-row grid gap-3 rounded-2xl border border-l-4 px-3 py-3 shadow-sm transition hover:shadow-md sm:px-4 sm:py-4 md:grid-cols-[1fr_auto] md:items-center", statusAccent[task.status], statusSurface[task.status], highlighted && "task-row--highlighted", detailMode && "task-row--detail")}>
       <div className="min-w-0">
         <div className="task-row__badges flex flex-wrap items-center gap-2">
-          <span className="rounded-full bg-neutral-950 px-2.5 py-1 font-mono text-xs font-black text-white">TP-{String(task.task_number || 0).padStart(4, "0")}</span>
+          {!detailMode ? <span className="rounded-full bg-neutral-950 px-2.5 py-1 font-mono text-xs font-black text-white">TP-{String(task.task_number || 0).padStart(4, "0")}</span> : null}
           <StatusBadge status={task.status} />
           <PriorityBadge priority={task.priority} />
           {task.cost_center_code ? <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-bold text-neutral-600">{task.cost_center_code}</span> : null}
         </div>
-        <div className="task-row__title mt-2 text-lg font-black leading-tight text-neutral-950">{task.title}</div>
-        <div className="task-row__facts mt-2 grid grid-cols-2 gap-2 text-xs text-neutral-600 lg:grid-cols-4">
-          <TaskFact label="Creada por" value={createdByLabel(task.created_by)} />
-          <TaskFact label="Responsable" value={task.assigned_to || "Sin responsable"} />
-          <TaskFact label="Proceso" value={task.process_type} wideOnMobile />
-          <TaskFact label="Tiempo aprox." value={formatEstimatedHours(task.estimated_minutes)} />
-        </div>
+        {!detailMode ? <div className="task-row__title mt-2 text-lg font-black leading-tight text-neutral-950">{task.title}</div> : null}
+        {detailMode ? (
+          <div className="task-detail-summary">
+            <div className="task-detail-responsibles">
+              <span>Responsables de la tarea</span>
+              <div>
+                {taskResponsibleNames.length
+                  ? taskResponsibleNames.map((name) => <b key={name}>{name}</b>)
+                  : <b>Sin responsable</b>}
+              </div>
+            </div>
+            <div className="task-detail-meta">
+              <span><small>Proceso</small><b>{task.process_type}</b></span>
+              <span><small>Tiempo aprox.</small><b>{formatEstimatedHours(task.estimated_minutes)}</b></span>
+              <span><small>Creada por</small><b>{createdByLabel(task.created_by)}</b></span>
+            </div>
+          </div>
+        ) : (
+          <div className="task-row__facts mt-2 grid grid-cols-2 gap-2 text-xs text-neutral-600 lg:grid-cols-4">
+            <TaskFact label="Creada por" value={createdByLabel(task.created_by)} />
+            <TaskFact label="Responsable" value={task.assigned_to || "Sin responsable"} />
+            <TaskFact label="Proceso" value={task.process_type} wideOnMobile />
+            <TaskFact label="Tiempo aprox." value={formatEstimatedHours(task.estimated_minutes)} />
+          </div>
+        )}
         {task.notes ? <p className="mt-2 line-clamp-2 text-xs text-neutral-500">{task.notes}</p> : null}
         {task.attachments.length ? (
           <AttachmentLinks attachments={task.attachments} className="task-row__attachments" />
@@ -1267,7 +1292,11 @@ function SubtaskRow({
         </div>
         <div className="subtask-row__people">
           <span>Operarios</span>
-          <b>{responsibleNames.length ? responsibleNames.join(", ") : "Sin asignar"}</b>
+          <div>
+            {responsibleNames.length
+              ? responsibleNames.map((name) => <b key={name}>{name}</b>)
+              : <b>Sin asignar</b>}
+          </div>
         </div>
         {subtask.notes ? <p>{subtask.notes}</p> : null}
         {subtask.attachments.length ? <AttachmentLinks attachments={subtask.attachments} /> : null}
@@ -1360,13 +1389,15 @@ function WorkspaceModalPanel({
   open,
   title,
   detail,
+  eyebrow = "Accion rapida",
   onClose,
   wide,
   children,
 }: {
   open: boolean;
   title: string;
-  detail: string;
+  detail?: string;
+  eyebrow?: string;
   onClose: () => void;
   wide?: boolean;
   children: React.ReactNode;
@@ -1414,9 +1445,9 @@ function WorkspaceModalPanel({
       <section className={cn("workspace-modal__panel", wide && "workspace-modal__panel--wide")} role="dialog" aria-modal="true" aria-label={title}>
         <header className="workspace-modal__header">
           <div>
-            <span>Accion rapida</span>
+            <span>{eyebrow}</span>
             <h2>{title}</h2>
-            <p>{detail}</p>
+            {detail ? <p>{detail}</p> : null}
           </div>
           <button type="button" className="workspace-modal__close" onClick={onClose} aria-label="Cerrar ventana">×</button>
         </header>
