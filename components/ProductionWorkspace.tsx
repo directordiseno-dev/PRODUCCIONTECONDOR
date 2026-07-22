@@ -9,6 +9,7 @@ import {
   createInventoryItem,
   createInventoryMovement,
   createProductionTask,
+  deleteProductionTask,
   updateInventoryItem,
   updateProductionSubtaskStatus,
   updateProductionTaskStatus,
@@ -107,6 +108,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
   const [modal, setModal] = useState<WorkspaceModal>(null);
   const [consumptionTaskId, setConsumptionTaskId] = useState("");
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
+  const [taskPendingDeletion, setTaskPendingDeletion] = useState<ProductionTask | null>(null);
   const [highlightedTaskId, setHighlightedTaskId] = useState("");
   const [activeOperatorId, setActiveOperatorId] = useState("");
   const [operatorPickerOpen, setOperatorPickerOpen] = useState(false);
@@ -274,7 +276,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
                 `${statusActionLabels[status] || "actualizar"} la subtarea`,
                 (operatorId) => runAction("Actualizando subtarea...", () => updateProductionSubtaskStatus(subtask.id, status, operatorId), "Subtarea actualizada."),
               )}
-              onDelete={(task) => runAction("Eliminando tarea...", () => updateProductionTaskStatus(task.id, "cancelada", "Tarea eliminada del tablero"), "Tarea eliminada.")}
+              onDelete={setTaskPendingDeletion}
             />
           ) : null}
 
@@ -381,6 +383,28 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
             action?.(activeOperatorId);
           }}
         />
+      </WorkspaceModalPanel>
+
+      <WorkspaceModalPanel
+        open={Boolean(taskPendingDeletion)}
+        title="Eliminar tarea"
+        detail="Esta accion requiere el codigo de autorizacion y conservara el historial de la tarea."
+        onClose={() => setTaskPendingDeletion(null)}
+      >
+        {taskPendingDeletion ? (
+          <DeleteTaskAuthorizationForm
+            key={taskPendingDeletion.id}
+            task={taskPendingDeletion}
+            pending={isPending}
+            onCancel={() => setTaskPendingDeletion(null)}
+            onConfirm={(code) => runAction(
+              "Eliminando tarea...",
+              () => deleteProductionTask(taskPendingDeletion.id, code),
+              "Tarea eliminada.",
+              () => setTaskPendingDeletion(null),
+            )}
+          />
+        ) : null}
       </WorkspaceModalPanel>
     </>
   );
@@ -884,15 +908,61 @@ function TaskRow({
             type="button"
             className="btn-danger h-11 px-3 text-sm"
             disabled={pending}
-            onClick={() => {
-              if (window.confirm(`¿Eliminar la tarea TP-${String(task.task_number || 0).padStart(4, "0")} · ${task.title}?`)) onDelete(task);
-            }}
+            onClick={() => onDelete(task)}
           >
             Eliminar
           </button>
         ) : null}
       </div>
     </div>
+  );
+}
+
+function DeleteTaskAuthorizationForm({
+  task,
+  pending,
+  onCancel,
+  onConfirm,
+}: {
+  task: ProductionTask;
+  pending: boolean;
+  onCancel: () => void;
+  onConfirm: (code: string) => void;
+}) {
+  const [code, setCode] = useState("");
+
+  return (
+    <form
+      className="space-y-5"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!code.trim()) return;
+        onConfirm(code);
+      }}
+    >
+      <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-950">
+        <strong className="block">TP-{String(task.task_number || 0).padStart(4, "0")} · {task.title}</strong>
+        <span className="mt-1 block text-sm">La tarea desaparecera del tablero, pero su historial se conservara.</span>
+      </div>
+      <label className="block">
+        <span className="mb-2 block font-semibold">Codigo de eliminacion</span>
+        <input
+          autoFocus
+          type="password"
+          value={code}
+          onChange={(event) => setCode(event.target.value)}
+          placeholder="Escribe el codigo"
+          autoComplete="off"
+          className="field-control"
+        />
+      </label>
+      <div className="grid grid-cols-2 gap-3">
+        <button type="button" className="btn-secondary h-12" disabled={pending} onClick={onCancel}>Cancelar</button>
+        <button type="submit" className="btn-danger h-12" disabled={pending || !code.trim()}>
+          {pending ? "Eliminando..." : "Eliminar tarea"}
+        </button>
+      </div>
+    </form>
   );
 }
 

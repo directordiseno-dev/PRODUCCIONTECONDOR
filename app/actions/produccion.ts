@@ -26,6 +26,7 @@ import type {
 
 type SupabaseError = { message?: string; code?: string; hint?: string | null; details?: string | null };
 const productionAttachmentsBucket = "production-task-attachments";
+const productionTaskDeleteCode = "TECONDOR2026";
 
 export async function listProductionWorkspaceData(): Promise<ProductionWorkspaceData> {
   const supabase = await createClient();
@@ -393,6 +394,9 @@ export async function createProductionTask(input: ProductionTaskInput): Promise<
 }
 
 export async function updateProductionTaskStatus(id: string, status: ProductionTaskStatus, notes?: string | null, performedById?: string): Promise<void> {
+  if (status === "cancelada") {
+    throw new Error("Para eliminar una tarea debes usar la confirmacion con codigo.");
+  }
   const supabase = await createClient();
   const requiresSharedOperator = ["en_proceso", "pausada", "terminada", "revisada"].includes(status);
   const performedBy = await resolveTaskActor(supabase, performedById, requiresSharedOperator);
@@ -432,12 +436,41 @@ export async function updateProductionTaskStatus(id: string, status: ProductionT
 
   if (status === "en_proceso") {
     await openWorkSession(supabase, cleanId, null, now, performedBy);
-  } else if (["pausada", "terminada", "cancelada"].includes(status)) {
+  } else if (["pausada", "terminada"].includes(status)) {
     await closeWorkSessions(supabase, cleanId, null, now, status, performedBy);
-    if (status === "cancelada") await closeAllWorkSessionsForTask(supabase, cleanId, now, status, performedBy);
   }
 
   await insertTaskEvent(supabase, cleanId, status, cleanNullable(notes), performedBy);
+  revalidatePath("/");
+}
+
+export async function deleteProductionTask(id: string, authorizationCode: string): Promise<void> {
+  const supabase = await createClient();
+  const performedBy = await resolveTaskActor(supabase, undefined, false);
+  const cleanId = clean(id);
+  if (!cleanId) throw new Error("No se encontro la tarea.");
+  if (clean(authorizationCode) !== productionTaskDeleteCode) {
+    throw new Error("El codigo de eliminacion es incorrecto.");
+  }
+
+  const now = new Date().toISOString();
+  const { data: task, error: taskQueryError } = await supabase
+    .from("production_tasks")
+    .select("id,status")
+    .eq("id", cleanId)
+    .single();
+  if (taskQueryError || !task) throwSupabaseError("consultar la tarea de produccion", taskQueryError ?? {});
+  if (task.status === "cancelada") throw new Error("Esta tarea ya fue eliminada.");
+
+  const { error } = await supabase
+    .from("production_tasks")
+    .update({ status: "cancelada", updated_at: now })
+    .eq("id", cleanId);
+  if (error) throwSupabaseError("eliminar la tarea de produccion", error);
+
+  await closeWorkSessions(supabase, cleanId, null, now, "cancelada", performedBy);
+  await closeAllWorkSessionsForTask(supabase, cleanId, now, "cancelada", performedBy);
+  await insertTaskEvent(supabase, cleanId, "cancelada", "Tarea eliminada del tablero con codigo de autorizacion", performedBy);
   revalidatePath("/");
 }
 
