@@ -843,8 +843,7 @@ function authenticatedActorLabel(user: { email?: string | null; user_metadata?: 
 }
 
 function isSharedProductionAccount(email: string | null | undefined): boolean {
-  const localPart = clean(email).toLowerCase().split("@")[0] || "";
-  return /^produccion(?:tecondor|[._-].*)?$/.test(localPart) || localPart === "production";
+  return clean(email).toLowerCase() === "produccion@tecondor.com";
 }
 
 async function resolvePerformerName(

@@ -2576,8 +2576,7 @@ function employeeInitials(value: string): string {
 }
 
 function isSharedProductionEmail(value: string): boolean {
-  const localPart = String(value || "").trim().toLowerCase().split("@")[0] || "";
-  return /^produccion(?:tecondor|[._-].*)?$/.test(localPart) || localPart === "production";
+  return String(value || "").trim().toLowerCase() === "produccion@tecondor.com";
 }
 
 function taskBelongsToUser(task: ProductionTask, email: string, userName: string): boolean {
