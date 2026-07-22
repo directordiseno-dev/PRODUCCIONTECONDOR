@@ -709,7 +709,6 @@ function TasksTab({
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null;
   const filters: Array<["todas" | "activas" | "mias" | ProductionTaskStatus, string, number]> = [
     ["todas", "Todas", tasks.length],
-    ["mias", "Mis tareas", tasks.filter((task) => taskBelongsToUser(task, email, userName)).length],
     ["activas", "Activas", activeCount],
     ["pendiente", "Pendientes", tasks.filter((task) => task.status === "pendiente").length],
     ["en_proceso", "En proceso", tasks.filter((task) => task.status === "en_proceso").length],
