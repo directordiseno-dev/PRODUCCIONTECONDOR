@@ -89,6 +89,12 @@ const statusActionLabels: Partial<Record<ProductionTaskStatus, string>> = {
 };
 
 const activeOperatorStorageKey = "tecondor-production-active-operator";
+const bogotaUtcOffsetMs = 5 * 60 * 60 * 1000;
+const productionWorkWindows: Array<[number, number]> = [
+  [7 * 60 + 30, 9 * 60],
+  [9 * 60 + 15, 13 * 60],
+  [13 * 60 + 45, 17 * 60],
+];
 
 export function ProductionWorkspace({ data, email, userName }: { data: ProductionWorkspaceData; email: string; userName: string }) {
   const router = useRouter();
@@ -908,7 +914,7 @@ function TaskTimingSummary({ task, timeTrackingReady }: { task: ProductionTask; 
     ? sumSessionDuration(task.work_sessions, finishedAtMs)
     : Number.NaN;
   const elapsedMs = Number.isFinite(startedAtMs) && Number.isFinite(finishedAtMs)
-    ? Math.max(0, finishedAtMs - startedAtMs)
+    ? scheduledWorkDuration(startedAtMs, finishedAtMs)
     : Number.NaN;
   const pausedMs = Number.isFinite(activeMs) && Number.isFinite(elapsedMs)
     ? Math.max(0, elapsedMs - activeMs)
@@ -927,13 +933,13 @@ function TaskTimingSummary({ task, timeTrackingReady }: { task: ProductionTask; 
     <details className="task-timing">
       <summary>
         <span>Historial de tiempos</span>
-        <small>Total transcurrido: <b>{totalLabel}</b></small>
+        <small>Tiempo de jornada: <b>{totalLabel}</b></small>
       </summary>
       <div className="task-timing__body">
         <div className="task-timing__metrics">
           <TimingMetric label="Tiempo activo" value={formatWorkDuration(activeMs)} />
           <TimingMetric label="Tiempo en pausa" value={formatWorkDuration(pausedMs)} />
-          <TimingMetric label="Duración total" value={totalLabel} />
+          <TimingMetric label="Duración en jornada" value={totalLabel} />
           <TimingMetric
             label="Frente al estimado"
             value={Number.isFinite(varianceMs)
@@ -969,7 +975,7 @@ function TaskTimingSummary({ task, timeTrackingReady }: { task: ProductionTask; 
             })}
           </div>
         ) : null}
-        <p className="task-timing__note">El tiempo activo suma cada periodo entre Iniciar y Pausar o Terminar.</p>
+        <p className="task-timing__note">Jornada: 7:30 a. m.–5:00 p. m. No cuenta el descanso de 9:00–9:15 a. m. ni el almuerzo de 1:00–1:45 p. m.</p>
       </div>
     </details>
   );
@@ -990,8 +996,32 @@ function sumSessionDuration(sessions: ProductionWorkSession[], fallbackEndMs: nu
     const explicitEndMs = Date.parse(session.ended_at || "");
     const endMs = Number.isFinite(explicitEndMs) ? explicitEndMs : fallbackEndMs;
     if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return total;
-    return total + (endMs - startMs);
+    return total + scheduledWorkDuration(startMs, endMs);
   }, 0);
+}
+
+function scheduledWorkDuration(startMs: number, endMs: number): number {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) return 0;
+
+  const dayMs = 24 * 60 * 60 * 1000;
+  const localStartMs = startMs - bogotaUtcOffsetMs;
+  const localEndMs = endMs - bogotaUtcOffsetMs;
+  let localDayStart = Math.floor(localStartMs / dayMs) * dayMs;
+  const lastLocalDayStart = Math.floor(localEndMs / dayMs) * dayMs;
+  let total = 0;
+
+  while (localDayStart <= lastLocalDayStart) {
+    for (const [startMinute, endMinute] of productionWorkWindows) {
+      const windowStartMs = localDayStart + (startMinute * 60_000) + bogotaUtcOffsetMs;
+      const windowEndMs = localDayStart + (endMinute * 60_000) + bogotaUtcOffsetMs;
+      const overlapStart = Math.max(startMs, windowStartMs);
+      const overlapEnd = Math.min(endMs, windowEndMs);
+      if (overlapEnd > overlapStart) total += overlapEnd - overlapStart;
+    }
+    localDayStart += dayMs;
+  }
+
+  return total;
 }
 
 function formatWorkDuration(milliseconds: number): string {
@@ -1280,10 +1310,18 @@ function TaskCreateForm({
   const totalFiles = taskFiles.length + subtasks.reduce((sum, subtask) => sum + subtask.files.length, 0);
 
   function addSubtask() {
+    const id = crypto.randomUUID();
     setSubtasks((current) => [
       ...current,
-      { id: crypto.randomUUID(), title: "", notes: "", employeeIds: [], files: [] },
+      { id, title: "", notes: "", employeeIds: [], files: [] },
     ]);
+    window.requestAnimationFrame(() => {
+      const card = document.querySelector<HTMLElement>(`[data-subtask-id="${id}"]`);
+      const titleInput = card?.querySelector<HTMLInputElement>("[data-subtask-title]");
+      card?.scrollIntoView({ behavior: "smooth", block: "end" });
+      titleInput?.focus({ preventScroll: true });
+      window.setTimeout(() => card?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 280);
+    });
   }
 
   function updateSubtask(id: string, patch: Partial<DraftSubtask>) {
@@ -1378,7 +1416,7 @@ function TaskCreateForm({
           {subtasks.length ? (
             <div className="subtask-builder__list">
               {subtasks.map((subtask, index) => (
-                <div key={subtask.id} className="subtask-builder__card">
+                <div key={subtask.id} className="subtask-builder__card" data-subtask-id={subtask.id}>
                   <div className="subtask-builder__header">
                     <strong>Subtarea {index + 1}</strong>
                     <button type="button" onClick={() => removeSubtask(subtask.id)}>Eliminar</button>
@@ -1388,6 +1426,7 @@ function TaskCreateForm({
                       <span className="label">Trabajo de esta subtarea</span>
                       <input
                         className="input"
+                        data-subtask-title
                         value={subtask.title}
                         onChange={(event) => updateSubtask(subtask.id, { title: event.target.value })}
                         placeholder="Ej. Cortar perfiles a la medida"
