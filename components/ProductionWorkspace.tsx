@@ -867,19 +867,20 @@ function CompactTaskRow({
     cancelada: "border-l-neutral-300",
   };
   const completedSubtasks = task.subtasks.filter((subtask) => ["terminada", "revisada"].includes(subtask.status)).length;
+  const isNewTask = task.status === "pendiente" && !task.started_at;
 
   return (
     <button
       id={`task-${task.id}`}
       type="button"
-      className={cn("compact-task-row", statusAccent[task.status], highlighted && "task-row--highlighted")}
+      className={cn("compact-task-row", statusAccent[task.status], isNewTask && "compact-task-row--new", highlighted && "task-row--highlighted")}
       onClick={onOpen}
       aria-label={`Abrir tarea TP-${String(task.task_number || 0).padStart(4, "0")}: ${task.title}`}
     >
       <span className="compact-task-row__main">
         <span className="compact-task-row__badges">
           <b>TP-{String(task.task_number || 0).padStart(4, "0")}</b>
-          <StatusBadge status={task.status} />
+          {isNewTask ? <NewTaskBadge /> : <StatusBadge status={task.status} />}
           <PriorityBadge priority={task.priority} />
         </span>
         <strong>{task.title}</strong>
@@ -947,12 +948,13 @@ function TaskRow({
     .split(",")
     .map((name) => name.trim())
     .filter(Boolean);
+  const isNewTask = task.status === "pendiente" && !task.started_at;
   return (
     <div id={`task-${task.id}`} className={cn("task-row grid gap-3 rounded-2xl border border-l-4 px-3 py-3 shadow-sm transition hover:shadow-md sm:px-4 sm:py-4 md:grid-cols-[1fr_auto] md:items-center", statusAccent[task.status], statusSurface[task.status], highlighted && "task-row--highlighted", detailMode && "task-row--detail")}>
       <div className="min-w-0">
         <div className="task-row__badges flex flex-wrap items-center gap-2">
           {!detailMode ? <span className="rounded-full bg-neutral-950 px-2.5 py-1 font-mono text-xs font-black text-white">TP-{String(task.task_number || 0).padStart(4, "0")}</span> : null}
-          <StatusBadge status={task.status} />
+          {isNewTask ? <NewTaskBadge /> : <StatusBadge status={task.status} />}
           <PriorityBadge priority={task.priority} />
           {task.cost_center_code ? <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-bold text-neutral-600">{task.cost_center_code}</span> : null}
         </div>
@@ -2737,6 +2739,10 @@ function EmptyState({ title, detail, compact }: { title: string; detail: string;
       <div className="mt-1 text-xs text-neutral-500">{detail}</div>
     </div>
   );
+}
+
+function NewTaskBadge() {
+  return <span className="new-task-badge"><i aria-hidden="true" />Nueva tarea</span>;
 }
 
 async function createProductionTaskWithUploads(submission: TaskCreateSubmission, performedById: string): Promise<string> {
