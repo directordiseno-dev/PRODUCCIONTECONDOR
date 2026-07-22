@@ -789,7 +789,6 @@ function TasksTab({
     ...task.subtasks.flatMap((subtask) => subtask.cost_center_codes ?? []),
   ]))).sort();
   const filters: Array<["todas" | "activas" | "historial" | ProductionTaskStatus, string, number]> = [
-    ["todas", "Todas", tasks.length],
     ["activas", "Activas", activeCount],
     ["pendiente", "Pendientes", tasks.filter((task) => task.status === "pendiente").length],
     ["en_proceso", "En proceso", tasks.filter((task) => task.status === "en_proceso").length],
@@ -1008,7 +1007,6 @@ function CompactTaskRow({
     revisada: "border-l-tecondor-magenta",
     cancelada: "border-l-neutral-300",
   };
-  const completedSubtasks = task.subtasks.filter((subtask) => ["terminada", "revisada"].includes(subtask.status)).length;
   const isNewTask = task.status === "pendiente" && !task.started_at;
   const isFinalTask = ["terminada", "revisada"].includes(task.status);
   const isPartialTask = !isFinalTask
@@ -1019,7 +1017,7 @@ function CompactTaskRow({
     <button
       id={`task-${task.id}`}
       type="button"
-      className={cn("compact-task-row", statusAccent[task.status], isNewTask && "compact-task-row--new", isPartialTask && "compact-task-row--partial", isFinalTask && "compact-task-row--history", highlighted && "task-row--highlighted")}
+      className={cn("compact-task-row", `compact-task-row--status-${task.status}`, statusAccent[task.status], isNewTask && "compact-task-row--new", isPartialTask && "compact-task-row--partial", isFinalTask && "compact-task-row--history", highlighted && "task-row--highlighted")}
       onClick={onOpen}
       aria-label={`Abrir tarea TP-${String(task.task_number || 0).padStart(4, "0")}: ${task.title}`}
     >
@@ -1039,10 +1037,7 @@ function CompactTaskRow({
       </span>
       <span className="compact-task-row__progress">
         {task.subtasks.length ? (
-          <>
-            <b>{task.subtasks.length} subtarea{task.subtasks.length === 1 ? "" : "s"}</b>
-            <small>{completedSubtasks}/{task.subtasks.length} terminadas</small>
-          </>
+          <SubtaskProgressBar subtasks={task.subtasks} compact />
         ) : (
           <small>Sin subtareas</small>
         )}
@@ -1163,6 +1158,7 @@ function TaskRow({
               <span>{task.subtasks.length} subtarea{task.subtasks.length === 1 ? "" : "s"}</span>
               <small>{task.subtasks.filter((subtask) => subtask.status === "terminada").length} terminadas</small>
             </div>
+            <SubtaskProgressBar subtasks={task.subtasks} />
             <div className="task-subtasks__list">
               {task.subtasks.map((subtask) => (
                 <SubtaskRow
@@ -1236,6 +1232,42 @@ function TaskRow({
       </div>
       )}
     </div>
+  );
+}
+
+function SubtaskProgressBar({ subtasks, compact = false }: { subtasks: ProductionSubtask[]; compact?: boolean }) {
+  const total = subtasks.length;
+  const completed = subtasks.filter((subtask) => ["terminada", "revisada"].includes(subtask.status)).length;
+  const pending = subtasks.filter((subtask) => subtask.status === "pendiente").length;
+  const active = Math.max(0, total - completed - pending);
+  const started = total - pending;
+  const startedPercent = total ? Math.round((started / total) * 100) : 0;
+  const completedPercent = total ? (completed / total) * 100 : 0;
+  const activePercent = total ? (active / total) * 100 : 0;
+  const pendingPercent = Math.max(0, 100 - completedPercent - activePercent);
+
+  return (
+    <span
+      className={cn("subtask-progress", compact && "subtask-progress--compact")}
+      aria-label={`${started} de ${total} subtareas iniciadas; ${completed} terminadas y ${pending} por iniciar`}
+    >
+      <span className="subtask-progress__labels">
+        <b>{startedPercent}% iniciadas</b>
+        <small>{completed}/{total} terminadas · {pending} por iniciar</small>
+      </span>
+      <span className="subtask-progress__track" aria-hidden="true">
+        {completedPercent ? <i className="subtask-progress__segment subtask-progress__segment--done" style={{ width: `${completedPercent}%` }} /> : null}
+        {activePercent ? <i className="subtask-progress__segment subtask-progress__segment--active" style={{ width: `${activePercent}%` }} /> : null}
+        {pendingPercent ? <i className="subtask-progress__segment subtask-progress__segment--pending" style={{ width: `${pendingPercent}%` }} /> : null}
+      </span>
+      {!compact ? (
+        <span className="subtask-progress__legend">
+          <small><i className="is-done" />Terminadas {completed}</small>
+          <small><i className="is-active" />En trabajo {active}</small>
+          <small><i className="is-pending" />Por iniciar {pending}</small>
+        </span>
+      ) : null}
+    </span>
   );
 }
 

@@ -353,10 +353,16 @@ button { touch-action: manipulation; }
 .compact-task-list { display: grid; gap: 7px; }
 .compact-task-row { display: grid; width: 100%; min-height: 82px; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 12px; border: 1px solid #e4e4e7; border-left-width: 4px; border-radius: 13px; background: #fff; padding: 10px 12px; text-align: left; box-shadow: 0 3px 12px rgba(15,23,42,.04); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
 .compact-task-row:hover { border-color: #e9a7c8; box-shadow: 0 7px 18px rgba(15,23,42,.08); transform: translateY(-1px); }
-.compact-task-row--new { border-color: #fecaca; border-left-color: #dc2626; background: linear-gradient(105deg,#fff 0%,#fff 68%,#fef2f2 100%); box-shadow: 0 5px 17px rgba(220,38,38,.1); }
-.compact-task-row--partial { border-color: #fed7aa; border-left-color: #f97316; background: linear-gradient(105deg,#fff 0%,#fff 68%,#fff7ed 100%); }
+.compact-task-row--status-pendiente { border-color: #fecaca; background: #fffafa; }
+.compact-task-row--status-en_proceso { border-color: #fde68a; background: #fffdf5; }
+.compact-task-row--status-pausada { border-color: #e4e4e7; background: #fafafa; }
+.compact-task-row--status-bloqueada { border-color: #fecaca; background: #fff7f7; }
+.compact-task-row--status-terminada { border-color: #bbf7d0; background: #f6fef9; }
+.compact-task-row--status-revisada { border-color: #f5c2dc; background: #fff8fc; }
+.compact-task-row--new { border-color: #fecaca; border-left-color: #dc2626; background: #fff7f7; box-shadow: 0 5px 17px rgba(220,38,38,.08); }
+.compact-task-row--partial { border-color: #fed7aa; border-left-color: #f97316; background: #fff8f1; }
 .task-row--partial { border-color: #fed7aa !important; border-left-color: #f97316 !important; background: #fff7ed !important; }
-.compact-task-row--history { border-color: #bbf7d0; border-left-color: #10b981; background: linear-gradient(105deg,#fff 0%,#fff 70%,#f0fdf4 100%); }
+.compact-task-row--history { border-color: #bbf7d0; border-left-color: #10b981; background: #f5fdf8; }
 .compact-task-row:focus-visible { outline: 3px solid rgba(190,30,114,.22); outline-offset: 2px; }
 .compact-task-row__main { display: grid; min-width: 0; gap: 4px; }
 .compact-task-row__badges { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 5px; }
@@ -366,9 +372,28 @@ button { touch-action: manipulation; }
 .compact-task-row__meta { display: flex; min-width: 0; gap: 6px; color: #71717a; font-size: 10px; font-weight: 750; }
 .compact-task-row__meta > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .compact-task-row__meta > span + span::before { content: "·"; margin-right: 6px; color: #d4d4d8; }
-.compact-task-row__progress { display: grid; min-width: 92px; gap: 2px; border-radius: 10px; background: #fafafa; padding: 7px 9px; color: #52525b; text-align: right; }
-.compact-task-row__progress b { color: #8E1557; font-size: 10px; }
-.compact-task-row__progress small { font-size: 9px; font-weight: 750; }
+.compact-task-row__progress { display: grid; min-width: 150px; gap: 2px; border: 1px solid rgba(255,255,255,.8); border-radius: 10px; background: rgba(255,255,255,.72); padding: 7px 9px; color: #52525b; text-align: right; }
+.compact-task-row__progress > small { font-size: 9px; font-weight: 750; }
+.subtask-progress { display: grid; gap: 6px; border-top: 1px solid rgba(190,30,114,.09); padding: 8px 10px; }
+.subtask-progress__labels { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.subtask-progress__labels b { color: #3f3f46; font-size: 10px; font-weight: 950; }
+.subtask-progress__labels small { color: #71717a; font-size: 9px; font-weight: 800; text-align: right; }
+.subtask-progress__track { display: flex; width: 100%; height: 9px; overflow: hidden; border-radius: 999px; background: #fee2e2; box-shadow: inset 0 0 0 1px rgba(127,29,29,.06); }
+.subtask-progress__segment { display: block; height: 100%; }
+.subtask-progress__segment--done { background: #6ee7b7; }
+.subtask-progress__segment--active { background: #fcd34d; }
+.subtask-progress__segment--pending { background: #fca5a5; }
+.subtask-progress__legend { display: flex; flex-wrap: wrap; gap: 5px 12px; color: #71717a; }
+.subtask-progress__legend small { display: inline-flex; align-items: center; gap: 4px; font-size: 8px; font-weight: 800; }
+.subtask-progress__legend i { width: 7px; height: 7px; border-radius: 999px; }
+.subtask-progress__legend .is-done { background: #6ee7b7; }
+.subtask-progress__legend .is-active { background: #fcd34d; }
+.subtask-progress__legend .is-pending { background: #fca5a5; }
+.subtask-progress--compact { gap: 4px; border-top: 0; padding: 0; }
+.subtask-progress--compact .subtask-progress__labels { display: grid; justify-items: end; gap: 0; }
+.subtask-progress--compact .subtask-progress__labels b { color: #8e1557; font-size: 10px; }
+.subtask-progress--compact .subtask-progress__labels small { font-size: 8px; white-space: nowrap; }
+.subtask-progress--compact .subtask-progress__track { height: 7px; }
 .compact-task-row__chevron { color: #BE1E72; font-size: 28px; font-weight: 500; line-height: 1; }
 .new-task-badge { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; background: #dc2626; padding: 4px 8px; color: #fff !important; font-size: 9px !important; font-weight: 950; letter-spacing: .02em; text-transform: uppercase; }
 .new-task-badge i { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 999px; background: #fff; box-shadow: 0 0 0 3px rgba(255,255,255,.22); }
@@ -920,9 +945,9 @@ button { touch-action: manipulation; }
   .compact-task-row__badges > span { font-size: 9px; }
   .compact-task-row__meta { gap: 4px; font-size: 9px; }
   .compact-task-row__meta > span + span::before { margin-right: 4px; }
-  .compact-task-row__progress { min-width: 78px; padding: 6px 7px; }
-  .compact-task-row__progress b { font-size: 9px; }
-  .compact-task-row__progress small { font-size: 8px; }
+  .compact-task-row__progress { min-width: 124px; padding: 6px 7px; }
+  .subtask-progress--compact .subtask-progress__labels b { font-size: 9px; }
+  .subtask-progress--compact .subtask-progress__labels small { max-width: 120px; overflow: hidden; font-size: 7px; text-overflow: ellipsis; }
   .compact-task-row__chevron { display: none; }
   .task-row__badges { gap: 4px; }
   .task-row__badges > span { padding-right: 7px; padding-left: 7px; font-size: 10px; }
