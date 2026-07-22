@@ -327,6 +327,16 @@ button { touch-action: manipulation; }
 
 .workspace-panel { min-width: 0; }
 .workspace-table, .workspace-list { min-width: 0; max-height: 62vh; overflow: auto; overscroll-behavior: contain; }
+.inventory-row-actions { display: flex; justify-content: flex-end; gap: 5px; }
+.inventory-row-actions button { min-height: 34px; padding: 5px 9px; font-size: 10px; }
+.inventory-edit-form__identity { border: 1px solid rgba(190,30,114,.18); border-radius: 13px; background: #FDF2F8; padding: 10px 12px; }
+.inventory-edit-form__identity span { display: block; color: #BE1E72; font-size: 9px; font-weight: 900; text-transform: uppercase; }
+.inventory-edit-form__identity strong { display: block; margin-top: 2px; color: #27272a; font-size: 16px; font-weight: 950; }
+.inventory-edit-form__identity small { color: #71717a; font-size: 10px; }
+.inventory-edit-form__stock { display: grid; grid-template-columns: minmax(0,1fr) minmax(150px,.55fr) minmax(150px,.55fr); align-items: end; gap: 10px; border: 1px solid #bae6fd; border-radius: 13px; background: #f0f9ff; padding: 11px; }
+.inventory-edit-form__stock > div:first-child { align-self: center; }
+.inventory-edit-form__stock > div:first-child span { display: block; color: #075985; font-size: 11px; font-weight: 950; }
+.inventory-edit-form__stock > div:first-child strong { display: block; margin-top: 2px; color: #64748b; font-size: 9px; }
 .consumption-grid { display: grid; min-width: 0; gap: 10px; }
 .task-filters { display: flex; gap: 6px; overflow-x: auto; padding: 2px 1px 4px; scroll-snap-type: x proximity; scrollbar-width: none; }
 .task-filters::-webkit-scrollbar { display: none; }
@@ -743,6 +753,9 @@ button { touch-action: manipulation; }
   .section-toolbar__actions .btn { min-height: 44px; padding-right: 13px; padding-left: 13px; font-size: 12px; }
   .task-row__facts { gap: 6px; }
   .task-row__actions .btn { min-width: 0; padding-right: 9px; padding-left: 9px; }
+  .inventory-edit-form__stock { grid-template-columns: 1fr; align-items: stretch; }
+  .inventory-row-actions { min-width: 150px; }
+  .inventory-row-actions button { flex: 1; }
   .list-search { grid-template-columns: minmax(0,1fr) auto; }
   .list-search > span { display: none; }
   .workspace-modal { padding: 0; }

@@ -187,6 +187,72 @@ export async function createInventoryItem(input: InventoryItemInput): Promise<st
   return String(data.id);
 }
 
+export async function updateInventoryItem(id: string, input: InventoryItemInput): Promise<void> {
+  const supabase = await createClient();
+  const itemId = clean(id);
+  const name = clean(input.name);
+  if (!itemId) throw new Error("No se encontro el item de inventario.");
+  if (!name) throw new Error("Escribe el nombre del item de inventario.");
+
+  const { data: currentItem, error: currentError } = await supabase
+    .from("inventory_items")
+    .select("*")
+    .eq("id", itemId)
+    .single();
+  if (currentError || !currentItem) throwSupabaseError("cargar el item de inventario", currentError ?? {});
+
+  const currentStock = Number(currentItem.stock || 0);
+  const nextStock = roundQuantity(positiveNumber(input.stock));
+  const stockDifference = roundQuantity(nextStock - currentStock);
+  const now = new Date().toISOString();
+  const { error: updateError } = await supabase
+    .from("inventory_items")
+    .update({
+      name,
+      category: clean(input.category) || "General",
+      unit: clean(input.unit) || "und",
+      stock: nextStock,
+      min_stock: positiveNumber(input.min_stock),
+      location: cleanNullable(input.location),
+      preferred_supplier_id: cleanNullable(input.preferred_supplier_id),
+      updated_at: now,
+    })
+    .eq("id", itemId);
+  if (updateError) throwSupabaseError("actualizar el item de inventario", updateError);
+
+  if (stockDifference !== 0) {
+    const unitCost = Number(currentItem.average_cost || 0);
+    const { error: movementError } = await supabase.from("inventory_movements").insert({
+      item_id: itemId,
+      movement_type: "ajuste",
+      quantity: stockDifference,
+      unit_cost: unitCost,
+      total_cost: roundMoney(Math.abs(stockDifference) * unitCost),
+      source_type: "edicion_inventario",
+      source_id: itemId,
+      notes: `Stock corregido de ${currentStock} a ${nextStock}`,
+      movement_date: todayInputValue(),
+      created_by: await currentUserEmail(supabase),
+    });
+    if (movementError) throwSupabaseError("guardar el ajuste de stock", movementError);
+  }
+
+  revalidatePath("/");
+}
+
+export async function archiveInventoryItem(id: string): Promise<void> {
+  const supabase = await createClient();
+  const itemId = clean(id);
+  if (!itemId) throw new Error("No se encontro el item de inventario.");
+
+  const { error } = await supabase
+    .from("inventory_items")
+    .update({ active: false, updated_at: new Date().toISOString() })
+    .eq("id", itemId);
+  if (error) throwSupabaseError("eliminar el item de inventario", error);
+  revalidatePath("/");
+}
+
 export async function createInventoryMovement(input: InventoryMovementInput): Promise<string> {
   const supabase = await createClient();
   return createInventoryMovementInternal(supabase, input, true);

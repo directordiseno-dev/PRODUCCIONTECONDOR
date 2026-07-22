@@ -4,10 +4,12 @@ import { useEffect, useId, useMemo, useRef, useState, useTransition } from "reac
 import { useRouter } from "next/navigation";
 import { AppHeader } from "@/components/AppHeader";
 import {
+  archiveInventoryItem,
   consumeProductionMaterials,
   createInventoryItem,
   createInventoryMovement,
   createProductionTask,
+  updateInventoryItem,
   updateProductionSubtaskStatus,
   updateProductionTaskStatus,
 } from "@/app/actions/produccion";
@@ -31,7 +33,7 @@ import type {
 } from "@/lib/types";
 
 type Tab = "tareas" | "inventario" | "consumos";
-type WorkspaceModal = "task" | "consumption" | "item" | "movement" | null;
+type WorkspaceModal = "task" | "consumption" | "item" | "edit-item" | "movement" | null;
 type Feedback = { type: "success" | "error" | "info"; text: string } | null;
 type DraftSubtask = {
   id: string;
@@ -83,6 +85,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
   const [activeTab, setActiveTab] = useState<Tab>("tareas");
   const [modal, setModal] = useState<WorkspaceModal>(null);
   const [consumptionTaskId, setConsumptionTaskId] = useState("");
+  const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [highlightedTaskId, setHighlightedTaskId] = useState("");
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [isPending, startTransition] = useTransition();
@@ -196,9 +199,11 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
           <div className="production-console__content">
           {activeTab === "inventario" ? (
             <InventoryTab
-              items={data.items}
+              items={data.items.filter((item) => item.active)}
               pending={isPending}
               onMovement={() => setModal("movement")}
+              onEdit={(item) => { setEditingItem(item); setModal("edit-item"); }}
+              onDelete={(item) => runAction("Eliminando item...", () => archiveInventoryItem(item.id), "Item eliminado del inventario.")}
             />
           ) : null}
 
@@ -273,9 +278,21 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
         />
       </WorkspaceModalPanel>
 
+      <WorkspaceModalPanel open={modal === "edit-item"} title="Editar item de inventario" detail="Corrige la informacion y la cantidad disponible." onClose={() => { setModal(null); setEditingItem(null); }} wide>
+        {editingItem ? (
+          <InventoryItemEditForm
+            item={editingItem}
+            suppliers={data.suppliers}
+            pending={isPending}
+            onCancel={() => { setModal(null); setEditingItem(null); }}
+            onSubmit={(form) => runAction("Actualizando item...", () => updateInventoryItem(editingItem.id, form), "Item actualizado.", () => { setModal(null); setEditingItem(null); setActiveTab("inventario"); })}
+          />
+        ) : null}
+      </WorkspaceModalPanel>
+
       <WorkspaceModalPanel open={modal === "movement"} title="Movimiento de inventario" detail="Registra una entrada, salida o ajuste manual." onClose={() => setModal(null)} wide>
         <InventoryMovementForm
-          items={data.items}
+          items={data.items.filter((item) => item.active)}
           costCenters={data.cost_centers}
           pending={isPending}
           onCancel={() => setModal(null)}
@@ -439,10 +456,14 @@ function InventoryTab({
   items,
   pending,
   onMovement,
+  onEdit,
+  onDelete,
 }: {
   items: InventoryItem[];
   pending: boolean;
   onMovement: () => void;
+  onEdit: (item: InventoryItem) => void;
+  onDelete: (item: InventoryItem) => void;
 }) {
   const [query, setQuery] = useState("");
   const normalizedQuery = normalizeSearchText(query);
@@ -477,6 +498,7 @@ function InventoryTab({
                 <th className="px-3 py-2 text-right">Stock</th>
                 <th className="px-3 py-2 text-right">Costo prom.</th>
                 <th className="px-3 py-2 text-left">Ubicacion</th>
+                <th className="px-3 py-2 text-right">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100">
@@ -492,6 +514,21 @@ function InventoryTab({
                   </td>
                   <td className="px-3 py-2 text-right">{formatCOP(item.average_cost)}</td>
                   <td className="px-3 py-2 text-neutral-600">{item.location || "-"}</td>
+                  <td className="px-3 py-2">
+                    <div className="inventory-row-actions">
+                      <button type="button" className="btn-secondary" disabled={pending} onClick={() => onEdit(item)}>Editar</button>
+                      <button
+                        type="button"
+                        className="btn-danger"
+                        disabled={pending}
+                        onClick={() => {
+                          if (window.confirm(`¿Eliminar ${item.name} del inventario? Su historial se conservará.`)) onDelete(item);
+                        }}
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1669,6 +1706,72 @@ function InventoryItemPicker({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function InventoryItemEditForm({
+  item,
+  suppliers,
+  pending,
+  onSubmit,
+  onCancel,
+}: {
+  item: InventoryItem;
+  suppliers: Supplier[];
+  pending: boolean;
+  onSubmit: (input: Parameters<typeof updateInventoryItem>[1]) => void;
+  onCancel: () => void;
+}) {
+  return (
+    <form
+      className="modal-form inventory-edit-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const formData = new FormData(event.currentTarget);
+        onSubmit({
+          name: textValue(formData, "name"),
+          category: textValue(formData, "category"),
+          unit: textValue(formData, "unit"),
+          stock: numberValue(formData, "stock"),
+          min_stock: numberValue(formData, "min_stock"),
+          location: textValue(formData, "location"),
+          preferred_supplier_id: textValue(formData, "preferred_supplier_id"),
+        });
+      }}
+    >
+      <div className="inventory-edit-form__identity">
+        <span>Item</span>
+        <strong>{item.name}</strong>
+        <small>{item.code}</small>
+      </div>
+      <div className="modal-form__grid modal-form__grid--3">
+        <Field name="name" label="Nombre del material" defaultValue={item.name} required autoFocus />
+        <Field name="category" label="Categoria" defaultValue={item.category} />
+        <Field name="unit" label="Unidad" defaultValue={item.unit} placeholder="und, m, kg" />
+      </div>
+      <div className="inventory-edit-form__stock">
+        <div>
+          <span>Corrige la existencia real</span>
+          <strong>La diferencia quedará registrada como ajuste.</strong>
+        </div>
+        <Field name="stock" label={`Cantidad disponible (${item.unit})`} type="number" step="0.001" min="0" defaultValue={String(item.stock)} required />
+        <Field name="min_stock" label="Stock minimo" type="number" step="0.001" min="0" defaultValue={String(item.min_stock)} />
+      </div>
+      <div className="modal-form__grid modal-form__grid--2">
+        <Field name="location" label="Ubicacion" defaultValue={item.location || ""} placeholder="Bodega, estante..." />
+        <SelectField
+          name="preferred_supplier_id"
+          label="Proveedor preferido"
+          options={suppliers.map((supplier) => [supplier.id, supplierLabel(supplier)])}
+          blank="Sin proveedor fijo"
+          defaultValue={item.preferred_supplier_id || ""}
+        />
+      </div>
+      <div className="modal-actions">
+        <button type="button" className="btn-secondary" disabled={pending} onClick={onCancel}>Cancelar</button>
+        <button type="submit" className="btn-primary" disabled={pending}>{pending ? "Guardando..." : "Guardar cambios"}</button>
+      </div>
+    </form>
   );
 }
 
