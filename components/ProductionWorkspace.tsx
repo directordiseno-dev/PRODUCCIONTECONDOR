@@ -1137,12 +1137,28 @@ function SubtaskRow({
   onStatus: (status: ProductionTaskStatus) => void;
 }) {
   const responsibleNames = subtask.assignments.map((assignment) => assignment.employee_name);
+  const durationMs = subtask.work_sessions.length
+    ? sumSessionDuration(subtask.work_sessions, Date.now())
+    : Number.NaN;
+  const durationPrefix = ["terminada", "revisada"].includes(subtask.status)
+    ? "Duracion"
+    : subtask.status === "en_proceso"
+      ? "En curso"
+      : subtask.status === "pausada"
+        ? "Acumulado"
+        : "Tiempo";
+  const durationLabel = Number.isFinite(durationMs)
+    ? formatWorkDuration(durationMs)
+    : subtask.status === "pendiente"
+      ? "Sin iniciar"
+      : "Sin detalle";
   return (
     <div className={cn("subtask-row", `subtask-row--${subtask.status}`)}>
       <div className="subtask-row__main">
         <div className="subtask-row__title">
           <StatusBadge status={subtask.status} />
           <strong>{subtask.title}</strong>
+          <span className="subtask-row__duration">{durationPrefix}: {durationLabel}</span>
         </div>
         <div className="subtask-row__people">
           <span>Operarios</span>

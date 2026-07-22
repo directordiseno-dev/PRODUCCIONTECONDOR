@@ -367,6 +367,7 @@ button { touch-action: manipulation; }
 .subtask-row__main { min-width: 0; }
 .subtask-row__title { display: flex; min-width: 0; align-items: center; gap: 7px; }
 .subtask-row__title strong { overflow: hidden; color: #27272a; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.subtask-row__duration { margin-left: auto; border-radius: 999px; background: rgba(255,255,255,.88); padding: 4px 8px; color: #065f46; font-size: 9px; font-weight: 950; white-space: nowrap; }
 .subtask-row__people { display: flex; min-width: 0; gap: 5px; margin-top: 5px; font-size: 10px; }
 .subtask-row__people span { color: #a1a1aa; font-weight: 900; text-transform: uppercase; }
 .subtask-row__people b { overflow: hidden; color: #52525b; text-overflow: ellipsis; white-space: nowrap; }
