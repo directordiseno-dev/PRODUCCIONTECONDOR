@@ -697,6 +697,7 @@ function TasksTab({
   onDelete: (task: ProductionTask) => void;
 }) {
   const [filter, setFilter] = useState<"todas" | "activas" | "mias" | ProductionTaskStatus>("todas");
+  const [selectedTaskId, setSelectedTaskId] = useState("");
   const filteredTasks = filter === "todas"
     ? tasks
     : filter === "activas"
@@ -705,6 +706,7 @@ function TasksTab({
       ? tasks.filter((task) => taskBelongsToUser(task, email, userName))
       : tasks.filter((task) => task.status === filter);
   const activeCount = tasks.filter((task) => !["terminada", "revisada", "cancelada"].includes(task.status)).length;
+  const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null;
   const filters: Array<["todas" | "activas" | "mias" | ProductionTaskStatus, string, number]> = [
     ["todas", "Todas", tasks.length],
     ["mias", "Mis tareas", tasks.filter((task) => taskBelongsToUser(task, email, userName)).length],
@@ -727,6 +729,7 @@ function TasksTab({
   }, [filter, highlightedTaskId]);
 
   return (
+    <>
     <div className="workspace-section workspace-section--tasks">
       <div className="section-toolbar">
         <div>
@@ -742,25 +745,46 @@ function TasksTab({
           </button>
         ))}
       </div>
-      <Panel title="Tareas de planta" detail="Inicia, pausa, termina o registra material desde la misma fila.">
-        <div className="workspace-list divide-y divide-neutral-100">
+      <Panel title="Tareas de planta" detail="Toca una tarea para abrir sus subtareas y acciones.">
+        <div className="workspace-list compact-task-list">
           {filteredTasks.map((task) => (
-            <TaskRow
+            <CompactTaskRow
               key={task.id}
               task={task}
-              pending={pending}
               highlighted={task.id === highlightedTaskId}
-              timeTrackingReady={timeTrackingReady}
-              onStatus={onStatus}
-              onSubtaskStatus={onSubtaskStatus}
-              onDelete={onDelete}
-              onConsume={() => onConsumeTask(task.id)}
+              onOpen={() => setSelectedTaskId(task.id)}
             />
           ))}
           {!filteredTasks.length ? <EmptyState title="No hay tareas en esta vista" detail="Cambia el filtro o crea una nueva tarea de produccion." /> : null}
         </div>
       </Panel>
     </div>
+    <WorkspaceModalPanel
+      open={Boolean(selectedTask)}
+      title={selectedTask ? `TP-${String(selectedTask.task_number || 0).padStart(4, "0")} · ${selectedTask.title}` : "Detalle de tarea"}
+      detail="Subtareas, responsables, tiempos y acciones de la tarea."
+      onClose={() => setSelectedTaskId("")}
+      wide
+    >
+      {selectedTask ? (
+        <TaskRow
+          task={selectedTask}
+          pending={pending}
+          timeTrackingReady={timeTrackingReady}
+          onStatus={onStatus}
+          onSubtaskStatus={onSubtaskStatus}
+          onDelete={(task) => {
+            setSelectedTaskId("");
+            onDelete(task);
+          }}
+          onConsume={() => {
+            setSelectedTaskId("");
+            onConsumeTask(selectedTask.id);
+          }}
+        />
+      ) : null}
+    </WorkspaceModalPanel>
+    </>
   );
 }
 
@@ -821,6 +845,62 @@ function ConsumptionTab({
         <RecentMovements movements={movements.filter((m) => m.movement_type === "salida").slice(0, 10)} />
       </div>
     </div>
+  );
+}
+
+function CompactTaskRow({
+  task,
+  highlighted,
+  onOpen,
+}: {
+  task: ProductionTask;
+  highlighted?: boolean;
+  onOpen: () => void;
+}) {
+  const statusAccent: Record<ProductionTaskStatus, string> = {
+    pendiente: "border-l-amber-400",
+    en_proceso: "border-l-sky-500",
+    pausada: "border-l-neutral-400",
+    bloqueada: "border-l-red-500",
+    terminada: "border-l-emerald-500",
+    revisada: "border-l-tecondor-magenta",
+    cancelada: "border-l-neutral-300",
+  };
+  const completedSubtasks = task.subtasks.filter((subtask) => ["terminada", "revisada"].includes(subtask.status)).length;
+
+  return (
+    <button
+      id={`task-${task.id}`}
+      type="button"
+      className={cn("compact-task-row", statusAccent[task.status], highlighted && "task-row--highlighted")}
+      onClick={onOpen}
+      aria-label={`Abrir tarea TP-${String(task.task_number || 0).padStart(4, "0")}: ${task.title}`}
+    >
+      <span className="compact-task-row__main">
+        <span className="compact-task-row__badges">
+          <b>TP-{String(task.task_number || 0).padStart(4, "0")}</b>
+          <StatusBadge status={task.status} />
+          <PriorityBadge priority={task.priority} />
+        </span>
+        <strong>{task.title}</strong>
+        <span className="compact-task-row__meta">
+          <span>{task.assigned_to || "Sin responsable"}</span>
+          <span>{task.process_type}</span>
+          <span>{formatEstimatedHours(task.estimated_minutes)}</span>
+        </span>
+      </span>
+      <span className="compact-task-row__progress">
+        {task.subtasks.length ? (
+          <>
+            <b>{task.subtasks.length} subtarea{task.subtasks.length === 1 ? "" : "s"}</b>
+            <small>{completedSubtasks}/{task.subtasks.length} terminadas</small>
+          </>
+        ) : (
+          <small>Sin subtareas</small>
+        )}
+      </span>
+      <span className="compact-task-row__chevron" aria-hidden="true">›</span>
+    </button>
   );
 }
 
