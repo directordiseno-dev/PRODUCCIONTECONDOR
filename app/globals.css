@@ -150,10 +150,6 @@ button { touch-action: manipulation; }
 .plant-brand__status span { width: 6px; height: 6px; border-radius: 50%; background: #10b981; box-shadow: 0 0 0 2px rgba(16,185,129,.12); }
 .plant-header__actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
 
-.operator-button { display: inline-flex; min-height: 38px; max-width: 180px; align-items: center; gap: 7px; border: 1px solid #a7f3d0; border-radius: 10px; background: #ecfdf5; padding: 0 10px 0 6px; color: #065f46; text-align: left; }
-.operator-button > span { display: grid; width: 27px; height: 27px; flex: 0 0 auto; place-items: center; border-radius: 8px; background: #059669; color: #fff; font-size: 9px; font-weight: 950; }
-.operator-button b { min-width: 0; overflow: hidden; font-size: 10px; line-height: 1.05; text-overflow: ellipsis; white-space: nowrap; }
-.operator-button small { display: block; margin-bottom: 2px; color: #047857; font-size: 7px; font-weight: 850; text-transform: uppercase; }
 
 .plant-nav { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; justify-content: center; gap: 3px; }
 .plant-nav button { min-height: 34px; border: 0; border-radius: 9px; background: transparent; padding: 0 9px; color: #52525b; font-size: 11px; font-weight: 850; white-space: nowrap; }
@@ -492,7 +488,6 @@ button { touch-action: manipulation; }
   animation: modal-rise .2s ease-out;
 }
 .workspace-modal__panel--wide { width: min(100%, 900px); }
-.workspace-modal__panel--required .workspace-modal__close { display: none; }
 .workspace-modal__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; border-bottom: 1px solid #edf0f3; padding: 17px 18px 14px; background: linear-gradient(120deg,#fff,#f8fafc); }
 .workspace-modal__header span { color: #BE1E72; font-size: 10px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
 .workspace-modal__header h2 { margin: 2px 0 0; font-size: 21px; line-height: 1.15; font-weight: 950; }
@@ -514,6 +509,8 @@ button { touch-action: manipulation; }
 .operator-picker__person small { margin-top: 3px; color: #71717a; font-size: 9px; }
 .operator-picker__person > b { border-radius: 999px; background: #d1fae5; padding: 4px 7px; color: #047857; font-size: 8px; text-transform: uppercase; }
 .operator-picker__empty { border: 1px dashed #fbbf24; border-radius: 12px; background: #fffbeb; padding: 16px; color: #92400e; font-size: 11px; text-align: center; }
+.operator-picker__actions { display: flex; justify-content: flex-end; }
+.operator-picker__actions button { min-width: 190px; }
 .operator-picker > p { margin: 0; color: #71717a; font-size: 9px; text-align: center; }
 .modal-form { display: grid; gap: 12px; }
 .modal-form__grid { display: grid; gap: 12px; }
@@ -753,9 +750,6 @@ button { touch-action: manipulation; }
   .notification-button { width: 38px; min-width: 38px; padding: 0; }
   .notification-button span { font-size: 0; }
   .notification-button span::after { content: "!"; font-size: 16px; }
-  .operator-button { width: 38px; max-width: 38px; padding: 0; justify-content: center; }
-  .operator-button > span { width: 27px; height: 27px; }
-  .operator-button b { display: none; }
   .production-main { padding-bottom: calc(82px + var(--safe-bottom)); }
   .mobile-primary-action {
     position: fixed;
@@ -823,6 +817,7 @@ button { touch-action: manipulation; }
   .task-wizard__review { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .subtask-builder__fields { grid-template-columns: 1fr; }
   .operator-picker__grid { grid-template-columns: 1fr; }
+  .operator-picker__actions button { width: 100%; min-width: 0; }
   .attachment-picker { grid-template-columns: 1fr; }
   .attachment-picker__button { width: 100%; }
   .subtask-row { grid-template-columns: 1fr; }

@@ -154,7 +154,7 @@ export async function listProductionWorkspaceData(): Promise<ProductionWorkspace
 
 export async function createInventoryItem(input: InventoryItemInput): Promise<string> {
   const supabase = await createClient();
-  const performedBy = await resolvePerformerName(supabase, input.performed_by);
+  const performedBy = await currentAuthenticatedActor(supabase);
   const name = clean(input.name);
   if (!name) throw new Error("Escribe el nombre del item de inventario.");
 
@@ -203,7 +203,7 @@ export async function createInventoryItem(input: InventoryItemInput): Promise<st
 
 export async function updateInventoryItem(id: string, input: InventoryItemInput): Promise<void> {
   const supabase = await createClient();
-  const performedBy = await resolvePerformerName(supabase, input.performed_by);
+  const performedBy = await currentAuthenticatedActor(supabase);
   const itemId = clean(id);
   const name = clean(input.name);
   if (!itemId) throw new Error("No se encontro el item de inventario.");
@@ -255,9 +255,9 @@ export async function updateInventoryItem(id: string, input: InventoryItemInput)
   revalidatePath("/");
 }
 
-export async function archiveInventoryItem(id: string, performedById: string): Promise<void> {
+export async function archiveInventoryItem(id: string): Promise<void> {
   const supabase = await createClient();
-  await resolvePerformerName(supabase, performedById);
+  await currentAuthenticatedActor(supabase);
   const itemId = clean(id);
   if (!itemId) throw new Error("No se encontro el item de inventario.");
 
@@ -271,13 +271,13 @@ export async function archiveInventoryItem(id: string, performedById: string): P
 
 export async function createInventoryMovement(input: InventoryMovementInput): Promise<string> {
   const supabase = await createClient();
-  const performedBy = await resolvePerformerName(supabase, input.performed_by);
+  const performedBy = await currentAuthenticatedActor(supabase);
   return createInventoryMovementInternal(supabase, input, true, performedBy);
 }
 
 export async function createProductionTask(input: ProductionTaskInput): Promise<string> {
   const supabase = await createClient();
-  const performedBy = await resolvePerformerName(supabase, input.performed_by);
+  const performedBy = await resolveTaskActor(supabase, input.performed_by, true);
   const title = clean(input.title);
   if (!title) throw new Error("Escribe el nombre de la tarea.");
 
@@ -394,7 +394,8 @@ export async function createProductionTask(input: ProductionTaskInput): Promise<
 
 export async function updateProductionTaskStatus(id: string, status: ProductionTaskStatus, notes?: string | null, performedById?: string): Promise<void> {
   const supabase = await createClient();
-  const performedBy = await resolvePerformerName(supabase, performedById);
+  const requiresSharedOperator = ["en_proceso", "pausada", "terminada", "revisada"].includes(status);
+  const performedBy = await resolveTaskActor(supabase, performedById, requiresSharedOperator);
   const cleanId = clean(id);
   if (!cleanId) throw new Error("No se encontro la tarea.");
 
@@ -442,7 +443,7 @@ export async function updateProductionTaskStatus(id: string, status: ProductionT
 
 export async function updateProductionSubtaskStatus(id: string, status: ProductionTaskStatus, performedById?: string): Promise<void> {
   const supabase = await createClient();
-  const performedBy = await resolvePerformerName(supabase, performedById);
+  const performedBy = await resolveTaskActor(supabase, performedById, true);
   const cleanId = clean(id);
   if (!cleanId) throw new Error("No se encontro la subtarea.");
   if (!["pendiente", "en_proceso", "pausada", "terminada"].includes(status)) {
@@ -514,7 +515,6 @@ export async function updateProductionSubtaskStatus(id: string, status: Producti
 
 export async function consumeProductionMaterial(input: ProductionMaterialConsumptionInput): Promise<string> {
   const movementIds = await consumeProductionMaterials({
-    performed_by: input.performed_by,
     task_id: input.task_id,
     items: [{ item_id: input.item_id, quantity: input.quantity }],
     notes: input.notes,
@@ -524,7 +524,7 @@ export async function consumeProductionMaterial(input: ProductionMaterialConsump
 
 export async function consumeProductionMaterials(input: ProductionMaterialBatchConsumptionInput): Promise<string[]> {
   const supabase = await createClient();
-  const performedBy = await resolvePerformerName(supabase, input.performed_by);
+  const performedBy = await currentAuthenticatedActor(supabase);
   const taskId = clean(input.task_id);
   if (!taskId) throw new Error("Selecciona la tarea.");
 
@@ -813,6 +813,38 @@ async function nextInventoryCode(supabase: Awaited<ReturnType<typeof createClien
     .select("id", { count: "exact", head: true });
   if (error && !isMissingProductionSchema(error)) throwSupabaseError("obtener consecutivo de inventario", error);
   return `INV-${String((count ?? 0) + 1).padStart(4, "0")}`;
+}
+
+async function resolveTaskActor(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  performerId: string | null | undefined,
+  requireSharedOperator: boolean,
+): Promise<string> {
+  const { data } = await supabase.auth.getUser();
+  const user = data.user;
+  if (!user) throw new Error("Tu sesion vencio. Vuelve a ingresar.");
+  if (!isSharedProductionAccount(user.email)) return authenticatedActorLabel(user);
+  if (!requireSharedOperator) return "Produccion";
+  return resolvePerformerName(supabase, performerId);
+}
+
+async function currentAuthenticatedActor(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+): Promise<string> {
+  const { data } = await supabase.auth.getUser();
+  const user = data.user;
+  if (!user) throw new Error("Tu sesion vencio. Vuelve a ingresar.");
+  return authenticatedActorLabel(user);
+}
+
+function authenticatedActorLabel(user: { email?: string | null; user_metadata?: Record<string, unknown> }): string {
+  const metadata = user.user_metadata ?? {};
+  return clean(String(metadata.full_name || metadata.name || user.email || "Usuario"));
+}
+
+function isSharedProductionAccount(email: string | null | undefined): boolean {
+  const localPart = clean(email).toLowerCase().split("@")[0] || "";
+  return /^produccion(?:tecondor|[._-].*)?$/.test(localPart) || localPart === "production";
 }
 
 async function resolvePerformerName(

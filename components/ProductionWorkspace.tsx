@@ -81,6 +81,13 @@ const statusLabels: Record<ProductionTaskStatus, string> = {
   cancelada: "Cancelada",
 };
 
+const statusActionLabels: Partial<Record<ProductionTaskStatus, string>> = {
+  en_proceso: "iniciar",
+  pausada: "pausar",
+  terminada: "terminar",
+  revisada: "revisar",
+};
+
 const activeOperatorStorageKey = "tecondor-production-active-operator";
 
 export function ProductionWorkspace({ data, email, userName }: { data: ProductionWorkspaceData; email: string; userName: string }) {
@@ -92,13 +99,15 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
   const [highlightedTaskId, setHighlightedTaskId] = useState("");
   const [activeOperatorId, setActiveOperatorId] = useState("");
   const [operatorPickerOpen, setOperatorPickerOpen] = useState(false);
-  const [operatorReady, setOperatorReady] = useState(false);
+  const [operatorActionLabel, setOperatorActionLabel] = useState("registrar esta acción");
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [isPending, startTransition] = useTransition();
   const knownNotificationIds = useRef<Set<string> | null>(null);
+  const pendingAttributedAction = useRef<((operatorId: string) => void) | null>(null);
   const activeOperator = data.employees.find((employee) => employee.id === activeOperatorId) ?? null;
-  const activeOperatorName = activeOperator?.name || userName;
   const employeeIdentityKey = data.employees.map((employee) => employee.id).join("|");
+  const usesSharedProductionAccount = isSharedProductionEmail(email);
+  const activeOperatorName = usesSharedProductionAccount ? activeOperator?.name || userName : userName;
 
   const visibleTasks = data.tasks.filter((task) => task.status !== "cancelada");
   const activeTasks = visibleTasks.filter((task) => !["terminada", "revisada"].includes(task.status));
@@ -120,8 +129,6 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
     const storedId = window.localStorage.getItem(activeOperatorStorageKey) || "";
     const validId = data.employees.some((employee) => employee.id === storedId) ? storedId : "";
     setActiveOperatorId(validId);
-    setOperatorPickerOpen(!validId);
-    setOperatorReady(true);
   }, [employeeIdentityKey, data.employees]);
 
   useEffect(() => {
@@ -158,10 +165,6 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
   }
 
   function runPrimaryAction() {
-    if (!activeOperatorId) {
-      setOperatorPickerOpen(true);
-      return;
-    }
     if (activeTab === "inventario") {
       setModal("item");
       return;
@@ -185,11 +188,6 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
     success = "Listo. Cambios guardados.",
     onSuccess?: () => void,
   ) {
-    if (!activeOperatorId) {
-      setFeedback({ type: "error", text: "Selecciona quien esta usando la aplicacion." });
-      setOperatorPickerOpen(true);
-      return;
-    }
     startTransition(async () => {
       setFeedback({ type: "info", text: label });
       try {
@@ -203,6 +201,21 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
     });
   }
 
+  function requestTaskAttribution(label: string, action: (operatorId: string) => void) {
+    if (!usesSharedProductionAccount) {
+      action("");
+      return;
+    }
+    pendingAttributedAction.current = action;
+    setOperatorActionLabel(label);
+    setOperatorPickerOpen(true);
+  }
+
+  function closeOperatorPicker() {
+    pendingAttributedAction.current = null;
+    setOperatorPickerOpen(false);
+  }
+
   if (!data.schemaReady) {
     return <ProductionSchemaNotice message={data.message} />;
   }
@@ -211,14 +224,12 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
     <>
       <AppHeader
         email={email}
-        activeOperatorName={activeOperator?.name || "Seleccionar persona"}
         activeSection={activeTab}
         primaryActionLabel={primaryActionLabel}
         notificationCount={taskNotifications.length}
         onSectionChange={setActiveTab}
         onPrimaryAction={runPrimaryAction}
         onNotificationsClick={() => { setHighlightedTaskId(taskNotifications[0]?.id || ""); setActiveTab("tareas"); }}
-        onChangeOperator={() => setOperatorPickerOpen(true)}
       />
       <main className="production-main">
         <div className="production-workspace">
@@ -231,7 +242,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
               pending={isPending}
               onMovement={() => setModal("movement")}
               onEdit={(item) => { setEditingItem(item); setModal("edit-item"); }}
-              onDelete={(item) => runAction("Eliminando item...", () => archiveInventoryItem(item.id, activeOperatorId), "Item eliminado del inventario.")}
+              onDelete={(item) => runAction("Eliminando item...", () => archiveInventoryItem(item.id), "Item eliminado del inventario.")}
             />
           ) : null}
 
@@ -244,9 +255,15 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
               highlightedTaskId={highlightedTaskId}
               timeTrackingReady={data.timeTrackingReady}
               onConsumeTask={openConsumption}
-              onStatus={(task, status) => runAction("Actualizando tarea...", () => updateProductionTaskStatus(task.id, status, null, activeOperatorId), "Tarea actualizada.")}
-              onSubtaskStatus={(subtask, status) => runAction("Actualizando subtarea...", () => updateProductionSubtaskStatus(subtask.id, status, activeOperatorId), "Subtarea actualizada.")}
-              onDelete={(task) => runAction("Eliminando tarea...", () => updateProductionTaskStatus(task.id, "cancelada", "Tarea eliminada del tablero", activeOperatorId), "Tarea eliminada.")}
+              onStatus={(task, status) => requestTaskAttribution(
+                `${statusActionLabels[status] || "actualizar"} la tarea`,
+                (operatorId) => runAction("Actualizando tarea...", () => updateProductionTaskStatus(task.id, status, null, operatorId), "Tarea actualizada."),
+              )}
+              onSubtaskStatus={(subtask, status) => requestTaskAttribution(
+                `${statusActionLabels[status] || "actualizar"} la subtarea`,
+                (operatorId) => runAction("Actualizando subtarea...", () => updateProductionSubtaskStatus(subtask.id, status, operatorId), "Subtarea actualizada."),
+              )}
+              onDelete={(task) => runAction("Eliminando tarea...", () => updateProductionTaskStatus(task.id, "cancelada", "Tarea eliminada del tablero"), "Tarea eliminada.")}
             />
           ) : null}
 
@@ -277,12 +294,12 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
           extensionsReady={data.taskExtensionsReady}
           pending={isPending}
           onCancel={() => setModal(null)}
-          onSubmit={(submission) => runAction(
-            submission.fileCount ? "Subiendo adjuntos y creando tarea..." : "Creando tarea de produccion...",
-            () => createProductionTaskWithUploads(submission, activeOperatorId),
-            "Tarea creada.",
-            () => { setModal(null); setActiveTab("tareas"); },
-          )}
+          onSubmit={(submission) => requestTaskAttribution("crear esta tarea", (operatorId) => runAction(
+              submission.fileCount ? "Subiendo adjuntos y creando tarea..." : "Creando tarea de produccion...",
+              () => createProductionTaskWithUploads(submission, operatorId),
+              "Tarea creada.",
+              () => { setModal(null); setActiveTab("tareas"); },
+            ))}
         />
       </WorkspaceModalPanel>
 
@@ -294,7 +311,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
           defaultTaskId={consumptionTaskId}
           pending={isPending}
           onCancel={() => setModal(null)}
-          onSubmit={(form) => runAction("Registrando materiales consumidos...", () => consumeProductionMaterials({ ...form, performed_by: activeOperatorId }), `${form.items.length} consumo${form.items.length === 1 ? "" : "s"} registrado${form.items.length === 1 ? "" : "s"}.`, () => { setModal(null); setConsumptionTaskId(""); setActiveTab("consumos"); })}
+          onSubmit={(form) => runAction("Registrando materiales consumidos...", () => consumeProductionMaterials(form), `${form.items.length} consumo${form.items.length === 1 ? "" : "s"} registrado${form.items.length === 1 ? "" : "s"}.`, () => { setModal(null); setConsumptionTaskId(""); setActiveTab("consumos"); })}
         />
       </WorkspaceModalPanel>
 
@@ -303,7 +320,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
           suppliers={data.suppliers}
           pending={isPending}
           onCancel={() => setModal(null)}
-          onSubmit={(form) => runAction("Creando item de inventario...", () => createInventoryItem({ ...form, performed_by: activeOperatorId }), "Item creado.", () => { setModal(null); setActiveTab("inventario"); })}
+          onSubmit={(form) => runAction("Creando item de inventario...", () => createInventoryItem(form), "Item creado.", () => { setModal(null); setActiveTab("inventario"); })}
         />
       </WorkspaceModalPanel>
 
@@ -314,7 +331,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
             suppliers={data.suppliers}
             pending={isPending}
             onCancel={() => { setModal(null); setEditingItem(null); }}
-            onSubmit={(form) => runAction("Actualizando item...", () => updateInventoryItem(editingItem.id, { ...form, performed_by: activeOperatorId }), "Item actualizado.", () => { setModal(null); setEditingItem(null); setActiveTab("inventario"); })}
+            onSubmit={(form) => runAction("Actualizando item...", () => updateInventoryItem(editingItem.id, form), "Item actualizado.", () => { setModal(null); setEditingItem(null); setActiveTab("inventario"); })}
           />
         ) : null}
       </WorkspaceModalPanel>
@@ -325,16 +342,15 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
           costCenters={data.cost_centers}
           pending={isPending}
           onCancel={() => setModal(null)}
-          onSubmit={(form) => runAction("Registrando movimiento de inventario...", () => createInventoryMovement({ ...form, performed_by: activeOperatorId }), "Movimiento registrado.", () => { setModal(null); setActiveTab("inventario"); })}
+          onSubmit={(form) => runAction("Registrando movimiento de inventario...", () => createInventoryMovement(form), "Movimiento registrado.", () => { setModal(null); setActiveTab("inventario"); })}
         />
       </WorkspaceModalPanel>
 
       <WorkspaceModalPanel
-        open={operatorReady && operatorPickerOpen}
-        title="¿Quién está usando la app?"
-        detail="Esta selección quedará registrada en cada acción."
-        onClose={() => { if (activeOperatorId) setOperatorPickerOpen(false); }}
-        canClose={Boolean(activeOperatorId)}
+        open={operatorPickerOpen}
+        title={`¿Quién va a ${operatorActionLabel}?`}
+        detail="Solo se pide para crear o cambiar el estado de una tarea."
+        onClose={closeOperatorPicker}
       >
         <OperatorPicker
           employees={data.employees}
@@ -342,8 +358,16 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
           onSelect={(employee) => {
             window.localStorage.setItem(activeOperatorStorageKey, employee.id);
             setActiveOperatorId(employee.id);
+          }}
+          onConfirm={() => {
+            if (!activeOperatorId) {
+              setFeedback({ type: "error", text: "Selecciona la persona que realiza esta acción." });
+              return;
+            }
+            const action = pendingAttributedAction.current;
+            pendingAttributedAction.current = null;
             setOperatorPickerOpen(false);
-            setFeedback({ type: "success", text: `Ahora registras como ${employee.name}.` });
+            action?.(activeOperatorId);
           }}
         />
       </WorkspaceModalPanel>
@@ -1105,7 +1129,6 @@ function WorkspaceModalPanel({
   title,
   detail,
   onClose,
-  canClose = true,
   wide,
   children,
 }: {
@@ -1113,7 +1136,6 @@ function WorkspaceModalPanel({
   title: string;
   detail: string;
   onClose: () => void;
-  canClose?: boolean;
   wide?: boolean;
   children: React.ReactNode;
 }) {
@@ -1126,7 +1148,7 @@ function WorkspaceModalPanel({
     }
     const previousOverflow = document.body.style.overflow;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && canClose) onClose();
+      if (event.key === "Escape") onClose();
     };
     document.body.style.overflow = "hidden";
     window.addEventListener("keydown", onKeyDown);
@@ -1134,14 +1156,14 @@ function WorkspaceModalPanel({
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [canClose, open, onClose]);
+  }, [open, onClose]);
 
   if (!open) return null;
 
   return (
     <div
       className={cn("workspace-modal", typing && "workspace-modal--typing")}
-      onMouseDown={(event) => { if (canClose && event.target === event.currentTarget) onClose(); }}
+      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
       onFocusCapture={(event) => {
         const target = event.target;
         const textInput = target instanceof HTMLInputElement && !["date", "checkbox", "radio", "hidden", "button", "submit"].includes(target.type);
@@ -1157,7 +1179,7 @@ function WorkspaceModalPanel({
         }, 0);
       }}
     >
-      <section className={cn("workspace-modal__panel", wide && "workspace-modal__panel--wide", !canClose && "workspace-modal__panel--required")} role="dialog" aria-modal="true" aria-label={title}>
+      <section className={cn("workspace-modal__panel", wide && "workspace-modal__panel--wide")} role="dialog" aria-modal="true" aria-label={title}>
         <header className="workspace-modal__header">
           <div>
             <span>Accion rapida</span>
@@ -1176,16 +1198,18 @@ function OperatorPicker({
   employees,
   activeOperatorId,
   onSelect,
+  onConfirm,
 }: {
   employees: ProductionEmployeeOption[];
   activeOperatorId: string;
   onSelect: (employee: ProductionEmployeeOption) => void;
+  onConfirm: () => void;
 }) {
   return (
     <div className="operator-picker">
       <div className="operator-picker__notice">
         <strong>Cuenta compartida</strong>
-        <span>Elige tu nombre antes de trabajar. La aplicación recordará esta selección en este celular.</span>
+        <span>Elige quién realiza esta acción para que quede correctamente en el historial.</span>
       </div>
       {employees.length ? (
         <div className="operator-picker__grid">
@@ -1210,7 +1234,12 @@ function OperatorPicker({
           No hay operarios o ingenieros activos. Agrégalos en empleados antes de registrar acciones.
         </div>
       )}
-      <p>Si otra persona toma este celular, debe tocar su nombre en la barra superior antes de continuar.</p>
+      <div className="operator-picker__actions">
+        <button type="button" className="btn-primary" disabled={!activeOperatorId} onClick={onConfirm}>
+          Confirmar y continuar
+        </button>
+      </div>
+      <p>La aplicación recordará la última selección para hacer más rápido el siguiente registro.</p>
     </div>
   );
 }
@@ -2544,6 +2573,11 @@ function createdByLabel(value: string | null): string {
 function employeeInitials(value: string): string {
   const words = String(value || "").trim().split(/\s+/).filter(Boolean);
   return words.slice(0, 2).map((word) => word.charAt(0).toUpperCase()).join("") || "?";
+}
+
+function isSharedProductionEmail(value: string): boolean {
+  const localPart = String(value || "").trim().toLowerCase().split("@")[0] || "";
+  return /^produccion(?:tecondor|[._-].*)?$/.test(localPart) || localPart === "production";
 }
 
 function taskBelongsToUser(task: ProductionTask, email: string, userName: string): boolean {
