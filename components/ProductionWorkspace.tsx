@@ -90,8 +90,13 @@ const statusActionLabels: Partial<Record<ProductionTaskStatus, string>> = {
 
 const activeOperatorStorageKey = "tecondor-production-active-operator";
 const bogotaUtcOffsetMs = 5 * 60 * 60 * 1000;
-const productionWorkWindows: Array<[number, number]> = [
+const regularWorkWindows: Array<[number, number]> = [
   [7 * 60 + 30, 9 * 60],
+  [9 * 60 + 15, 13 * 60],
+  [13 * 60 + 45, 17 * 60],
+];
+const fridayWorkWindows: Array<[number, number]> = [
+  [8 * 60, 9 * 60],
   [9 * 60 + 15, 13 * 60],
   [13 * 60 + 45, 17 * 60],
 ];
@@ -975,7 +980,7 @@ function TaskTimingSummary({ task, timeTrackingReady }: { task: ProductionTask; 
             })}
           </div>
         ) : null}
-        <p className="task-timing__note">Jornada: 7:30 a. m.–5:00 p. m. No cuenta el descanso de 9:00–9:15 a. m. ni el almuerzo de 1:00–1:45 p. m.</p>
+        <p className="task-timing__note">Jornada: lunes a jueves 7:30 a. m.–5:00 p. m.; viernes 8:00 a. m.–5:00 p. m. No cuenta 9:00–9:15 a. m. ni 1:00–1:45 p. m.</p>
       </div>
     </details>
   );
@@ -1011,7 +1016,13 @@ function scheduledWorkDuration(startMs: number, endMs: number): number {
   let total = 0;
 
   while (localDayStart <= lastLocalDayStart) {
-    for (const [startMinute, endMinute] of productionWorkWindows) {
+    const dayOfWeek = new Date(localDayStart).getUTCDay();
+    const workWindows = dayOfWeek === 0 || dayOfWeek === 6
+      ? []
+      : dayOfWeek === 5
+        ? fridayWorkWindows
+        : regularWorkWindows;
+    for (const [startMinute, endMinute] of workWindows) {
       const windowStartMs = localDayStart + (startMinute * 60_000) + bogotaUtcOffsetMs;
       const windowEndMs = localDayStart + (endMinute * 60_000) + bogotaUtcOffsetMs;
       const overlapStart = Math.max(startMs, windowStartMs);
