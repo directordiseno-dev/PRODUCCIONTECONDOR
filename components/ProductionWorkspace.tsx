@@ -1182,7 +1182,7 @@ function SubtaskRow({
     <div className={cn("subtask-row", `subtask-row--${subtask.status}`)}>
       <div className="subtask-row__main">
         <div className="subtask-row__title">
-          <StatusBadge status={subtask.status} />
+          <span className="subtask-row__status"><StatusBadge status={subtask.status} /></span>
           <strong>{subtask.title}</strong>
           <span className="subtask-row__duration">{durationPrefix}: {durationLabel}</span>
         </div>

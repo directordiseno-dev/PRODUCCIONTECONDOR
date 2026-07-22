@@ -365,6 +365,7 @@ button { touch-action: manipulation; }
 .subtask-row--terminada { border-left-color: #10b981; background: #f0fdf4; }
 .subtask-row__main { min-width: 0; }
 .subtask-row__title { display: flex; min-width: 0; align-items: center; gap: 7px; }
+.subtask-row__status { display: inline-flex; flex: 0 0 auto; }
 .subtask-row__title strong { overflow: hidden; color: #27272a; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .subtask-row__duration { margin-left: auto; border-radius: 999px; background: rgba(255,255,255,.88); padding: 4px 8px; color: #065f46; font-size: 9px; font-weight: 950; white-space: nowrap; }
 .subtask-row__people { display: flex; min-width: 0; gap: 5px; margin-top: 5px; font-size: 10px; }
@@ -840,9 +841,10 @@ button { touch-action: manipulation; }
   .subtask-row--pendiente,
   .subtask-row--pausada { grid-template-columns: minmax(0,1fr) auto; }
   .subtask-row--en_proceso { grid-template-columns: 1fr; }
-  .subtask-row__title { gap: 5px; }
-  .subtask-row__title strong { font-size: 11px; }
-  .subtask-row__duration { padding: 3px 6px; font-size: 8px; }
+  .subtask-row__title { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 4px 6px; }
+  .subtask-row__status { grid-column: 1; grid-row: 1; }
+  .subtask-row__title strong { grid-column: 1 / -1; grid-row: 2; overflow: visible; font-size: 12px; line-height: 1.25; text-overflow: clip; white-space: normal; }
+  .subtask-row__duration { grid-column: 2; grid-row: 1; margin-left: 0; padding: 3px 6px; font-size: 8px; }
   .subtask-row__people { margin-top: 3px; font-size: 8px; }
   .subtask-row__actions { justify-content: stretch; }
   .subtask-row__actions button { min-width: 84px; flex: 1; }
