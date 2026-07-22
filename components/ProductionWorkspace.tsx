@@ -1520,6 +1520,7 @@ function OperatorPicker({
   onSelect: (employee: ProductionEmployeeOption) => void;
   onConfirm: () => void;
 }) {
+  const selectedEmployee = employees.find((employee) => employee.id === activeOperatorId) ?? null;
   return (
     <div className="operator-picker">
       <div className="operator-picker__notice">
@@ -1549,12 +1550,16 @@ function OperatorPicker({
           No hay operarios o ingenieros activos. Agrégalos en empleados antes de registrar acciones.
         </div>
       )}
+      <p>La aplicación recordará la última selección para hacer más rápido el siguiente registro.</p>
       <div className="operator-picker__actions">
+        <div>
+          <small>Persona seleccionada</small>
+          <strong>{selectedEmployee?.name || "Elige una persona"}</strong>
+        </div>
         <button type="button" className="btn-primary" disabled={!activeOperatorId} onClick={onConfirm}>
-          Confirmar y continuar
+          Confirmar
         </button>
       </div>
-      <p>La aplicación recordará la última selección para hacer más rápido el siguiente registro.</p>
     </div>
   );
 }

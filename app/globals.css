@@ -543,7 +543,7 @@ button { touch-action: manipulation; }
 .operator-picker__notice { display: grid; gap: 3px; border: 1px solid #a7f3d0; border-radius: 12px; background: #ecfdf5; padding: 10px 12px; }
 .operator-picker__notice strong { color: #065f46; font-size: 12px; font-weight: 950; }
 .operator-picker__notice span { color: #047857; font-size: 10px; line-height: 1.4; }
-.operator-picker__grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
+.operator-picker__grid { display: grid; max-height: min(42dvh,390px); grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; overflow-y: auto; padding-right: 2px; overscroll-behavior: contain; }
 .operator-picker__person { display: grid; min-width: 0; min-height: 62px; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 9px; border: 1px solid #e4e4e7; border-radius: 12px; background: #fff; padding: 8px; color: #27272a; text-align: left; box-shadow: 0 4px 14px rgba(15,23,42,.04); }
 .operator-picker__person:hover, .operator-picker__person.is-active { border-color: #6ee7b7; background: #f0fdf4; }
 .operator-picker__person > span { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 11px; background: #FCE4F0; color: #8E1557; font-size: 11px; font-weight: 950; }
@@ -553,8 +553,13 @@ button { touch-action: manipulation; }
 .operator-picker__person small { margin-top: 3px; color: #71717a; font-size: 9px; }
 .operator-picker__person > b { border-radius: 999px; background: #d1fae5; padding: 4px 7px; color: #047857; font-size: 8px; text-transform: uppercase; }
 .operator-picker__empty { border: 1px dashed #fbbf24; border-radius: 12px; background: #fffbeb; padding: 16px; color: #92400e; font-size: 11px; text-align: center; }
-.operator-picker__actions { display: flex; justify-content: flex-end; }
-.operator-picker__actions button { min-width: 190px; }
+.operator-picker__actions { position: sticky; bottom: -18px; z-index: 4; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 10px; margin: 0 -18px -18px; border-top: 1px solid #e4e4e7; background: rgba(255,255,255,.98); padding: 11px 18px calc(11px + var(--safe-bottom)); box-shadow: 0 -10px 25px rgba(15,23,42,.08); }
+.operator-picker__actions > div { min-width: 0; }
+.operator-picker__actions small,
+.operator-picker__actions strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.operator-picker__actions small { color: #a1a1aa; font-size: 8px; font-weight: 900; text-transform: uppercase; }
+.operator-picker__actions strong { margin-top: 2px; color: #27272a; font-size: 11px; }
+.operator-picker__actions button { min-width: 150px; min-height: 52px; font-size: 14px; }
 .operator-picker > p { margin: 0; color: #71717a; font-size: 9px; text-align: center; }
 .modal-form { display: grid; gap: 12px; }
 .modal-form__grid { display: grid; gap: 12px; }
@@ -896,7 +901,8 @@ button { touch-action: manipulation; }
   .task-wizard__review { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .subtask-builder__fields { grid-template-columns: 1fr; }
   .operator-picker__grid { grid-template-columns: 1fr; }
-  .operator-picker__actions button { width: 100%; min-width: 0; }
+  .operator-picker__actions { bottom: -14px; margin-right: -14px; margin-bottom: -14px; margin-left: -14px; padding-right: 14px; padding-left: 14px; }
+  .operator-picker__actions button { width: auto; min-width: 130px; }
   .attachment-picker { grid-template-columns: 1fr; }
   .attachment-picker__button { width: 100%; }
   .subtask-row { gap: 6px; border-radius: 8px; padding: 6px; }
