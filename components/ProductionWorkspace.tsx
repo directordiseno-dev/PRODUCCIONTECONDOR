@@ -145,13 +145,39 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
   }, [employeeIdentityKey, data.employees]);
 
   useEffect(() => {
-    const refresh = () => router.refresh();
-    const interval = window.setInterval(refresh, 30000);
+    const supabase = createBrowserClient();
+    let refreshTimer: number | undefined;
+    const refresh = () => {
+      if (refreshTimer) return;
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = undefined;
+        router.refresh();
+      }, 250);
+    };
+    const realtimeTables = [
+      "production_tasks",
+      "production_subtasks",
+      "production_subtask_assignments",
+      "production_work_sessions",
+      "production_task_materials",
+      "inventory_items",
+      "inventory_movements",
+    ];
+    const channel = supabase.channel("production-workspace-live");
+    realtimeTables.forEach((table) => {
+      channel.on("postgres_changes", { event: "*", schema: "public", table }, refresh);
+    });
+    channel.subscribe();
+
+    // Respaldo para instalaciones donde Realtime tarde en reconectarse.
+    const interval = window.setInterval(refresh, 5000);
     const onVisibilityChange = () => { if (document.visibilityState === "visible") refresh(); };
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
+      if (refreshTimer) window.clearTimeout(refreshTimer);
       window.clearInterval(interval);
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      void supabase.removeChannel(channel);
     };
   }, [router]);
 
@@ -856,11 +882,11 @@ function TaskRow({
           <AttachmentLinks attachments={task.attachments} className="task-row__attachments" />
         ) : null}
         {task.subtasks.length ? (
-          <details className="task-subtasks">
-            <summary>
+          <section className="task-subtasks" aria-label="Subtareas">
+            <div className="task-subtasks__header">
               <span>{task.subtasks.length} subtarea{task.subtasks.length === 1 ? "" : "s"}</span>
               <small>{task.subtasks.filter((subtask) => subtask.status === "terminada").length} terminadas</small>
-            </summary>
+            </div>
             <div className="task-subtasks__list">
               {task.subtasks.map((subtask) => (
                 <SubtaskRow
@@ -871,7 +897,7 @@ function TaskRow({
                 />
               ))}
             </div>
-          </details>
+          </section>
         ) : null}
         {["terminada", "revisada"].includes(task.status) ? (
           <TaskTimingSummary task={task} timeTrackingReady={timeTrackingReady} />
@@ -1169,7 +1195,7 @@ function SubtaskRow({
       </div>
       <div className="subtask-row__actions">
         {["pendiente", "pausada"].includes(subtask.status) ? (
-          <button type="button" className="btn-secondary" disabled={pending} onClick={() => onStatus("en_proceso")}>Iniciar</button>
+          <button type="button" className="btn-primary" disabled={pending} onClick={() => onStatus("en_proceso")}>Iniciar</button>
         ) : null}
         {subtask.status === "en_proceso" ? (
           <>

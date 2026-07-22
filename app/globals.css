@@ -355,10 +355,9 @@ button { touch-action: manipulation; }
 .attachment-links a:hover { border-color: #f0b5d2; background: #FCE4F0; }
 .attachment-links__unavailable { color: #71717a; }
 .task-subtasks { margin-top: 10px; border: 1px solid rgba(190,30,114,.14); border-radius: 12px; background: rgba(255,255,255,.65); }
-.task-subtasks > summary { display: flex; min-height: 42px; cursor: pointer; list-style: none; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 11px; color: #8E1557; }
-.task-subtasks > summary::-webkit-details-marker { display: none; }
-.task-subtasks > summary span { font-size: 12px; font-weight: 950; }
-.task-subtasks > summary small { color: #71717a; font-size: 10px; font-weight: 800; }
+.task-subtasks__header { display: flex; min-height: 42px; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 11px; color: #8E1557; }
+.task-subtasks__header span { font-size: 12px; font-weight: 950; }
+.task-subtasks__header small { color: #71717a; font-size: 10px; font-weight: 800; }
 .task-subtasks__list { display: grid; gap: 7px; border-top: 1px solid rgba(190,30,114,.1); padding: 8px; }
 .subtask-row { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 9px; border: 1px solid #e4e4e7; border-left: 4px solid #fbbf24; border-radius: 10px; background: #fff; padding: 9px; }
 .subtask-row--en_proceso { border-left-color: #0ea5e9; }
@@ -373,7 +372,7 @@ button { touch-action: manipulation; }
 .subtask-row__people b { overflow: hidden; color: #52525b; text-overflow: ellipsis; white-space: nowrap; }
 .subtask-row__main > p { margin: 5px 0; color: #71717a; font-size: 10px; }
 .subtask-row__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; }
-.subtask-row__actions button { min-height: 34px; padding: 5px 9px; font-size: 10px; }
+.subtask-row__actions button { min-width: 92px; min-height: 46px; padding: 9px 16px; font-size: 12px; }
 .task-timing { margin-top: 9px; overflow: hidden; border: 1px solid #a7f3d0; border-radius: 12px; background: rgba(240,253,244,.9); }
 .task-timing > summary { display: flex; min-height: 42px; cursor: pointer; list-style: none; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 11px; color: #065f46; }
 .task-timing > summary::-webkit-details-marker { display: none; }
