@@ -289,8 +289,6 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
             <TasksTab
               tasks={visibleTasks}
               pending={isPending}
-              email={email}
-              userName={activeOperatorName}
               highlightedTaskId={highlightedTaskId}
               timeTrackingReady={data.timeTrackingReady}
               onConsumeTask={openConsumption}
@@ -676,8 +674,6 @@ function InventoryTab({
 function TasksTab({
   tasks,
   pending,
-  email,
-  userName,
   highlightedTaskId,
   timeTrackingReady,
   onConsumeTask,
@@ -687,8 +683,6 @@ function TasksTab({
 }: {
   tasks: ProductionTask[];
   pending: boolean;
-  email: string;
-  userName: string;
   highlightedTaskId: string;
   timeTrackingReady: boolean;
   onConsumeTask: (taskId?: string) => void;
@@ -696,25 +690,29 @@ function TasksTab({
   onSubtaskStatus: (subtask: ProductionSubtask, status: ProductionTaskStatus) => void;
   onDelete: (task: ProductionTask) => void;
 }) {
-  const [filter, setFilter] = useState<"todas" | "activas" | "mias" | ProductionTaskStatus>("todas");
+  const [filter, setFilter] = useState<"todas" | "activas" | "historial" | ProductionTaskStatus>("todas");
   const [selectedTaskId, setSelectedTaskId] = useState("");
+  const historyTasks = tasks
+    .filter((task) => ["terminada", "revisada"].includes(task.status))
+    .sort((left, right) => Date.parse(right.finished_at || right.updated_at) - Date.parse(left.finished_at || left.updated_at));
   const filteredTasks = filter === "todas"
     ? tasks
     : filter === "activas"
     ? tasks.filter((task) => !["terminada", "revisada", "cancelada"].includes(task.status))
-    : filter === "mias"
-      ? tasks.filter((task) => taskBelongsToUser(task, email, userName))
+    : filter === "historial"
+      ? historyTasks
       : tasks.filter((task) => task.status === filter);
   const activeCount = tasks.filter((task) => !["terminada", "revisada", "cancelada"].includes(task.status)).length;
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null;
-  const filters: Array<["todas" | "activas" | "mias" | ProductionTaskStatus, string, number]> = [
+  const selectedTaskIsFinal = Boolean(selectedTask && ["terminada", "revisada"].includes(selectedTask.status));
+  const historyGroups = groupTasksByFinishedDay(historyTasks);
+  const filters: Array<["todas" | "activas" | "historial" | ProductionTaskStatus, string, number]> = [
     ["todas", "Todas", tasks.length],
     ["activas", "Activas", activeCount],
     ["pendiente", "Pendientes", tasks.filter((task) => task.status === "pendiente").length],
     ["en_proceso", "En proceso", tasks.filter((task) => task.status === "en_proceso").length],
     ["pausada", "Pausadas", tasks.filter((task) => task.status === "pausada").length],
-    ["terminada", "Terminadas", tasks.filter((task) => task.status === "terminada").length],
-    ["revisada", "Revisadas", tasks.filter((task) => task.status === "revisada").length],
+    ["historial", "Historial", historyTasks.length],
   ];
 
   useEffect(() => {
@@ -744,9 +742,21 @@ function TasksTab({
           </button>
         ))}
       </div>
-      <Panel title="Tareas de planta" detail="Toca una tarea para abrir sus subtareas y acciones.">
+      <Panel
+        title={filter === "historial" ? "Historial por dias" : "Tareas de planta"}
+        detail={filter === "historial" ? "Resumen de las tareas terminadas en cada jornada." : "Toca una tarea para abrir sus subtareas y acciones."}
+      >
         <div className="workspace-list compact-task-list">
-          {filteredTasks.map((task) => (
+          {filter === "historial" ? historyGroups.map((group) => (
+            <section key={group.key} className="task-history-day">
+              <header><strong>{group.label}</strong><span>{group.tasks.length} tarea{group.tasks.length === 1 ? "" : "s"}</span></header>
+              <div>
+                {group.tasks.map((task) => (
+                  <CompactTaskRow key={task.id} task={task} onOpen={() => setSelectedTaskId(task.id)} />
+                ))}
+              </div>
+            </section>
+          )) : filteredTasks.map((task) => (
             <CompactTaskRow
               key={task.id}
               task={task}
@@ -760,7 +770,7 @@ function TasksTab({
     </div>
     <WorkspaceModalPanel
       open={Boolean(selectedTask)}
-      eyebrow={selectedTask ? `Tarea TP-${String(selectedTask.task_number || 0).padStart(4, "0")}` : "Tarea"}
+      eyebrow={selectedTask ? `${selectedTaskIsFinal ? "Resumen final" : "Tarea"} TP-${String(selectedTask.task_number || 0).padStart(4, "0")}` : "Tarea"}
       title={selectedTask?.title || "Detalle de tarea"}
       onClose={() => setSelectedTaskId("")}
       wide
@@ -770,6 +780,7 @@ function TasksTab({
           task={selectedTask}
           pending={pending}
           detailMode
+          readOnly={selectedTaskIsFinal}
           timeTrackingReady={timeTrackingReady}
           onStatus={onStatus}
           onSubtaskStatus={onSubtaskStatus}
@@ -786,6 +797,35 @@ function TasksTab({
     </WorkspaceModalPanel>
     </>
   );
+}
+
+function groupTasksByFinishedDay(tasks: ProductionTask[]): Array<{ key: string; label: string; tasks: ProductionTask[] }> {
+  const groups = new Map<string, { key: string; label: string; tasks: ProductionTask[] }>();
+  const keyFormatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Bogota",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const labelFormatter = new Intl.DateTimeFormat("es-CO", {
+    timeZone: "America/Bogota",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+
+  tasks.forEach((task) => {
+    const date = new Date(task.finished_at || task.updated_at || task.created_at);
+    const key = Number.isFinite(date.getTime()) ? keyFormatter.format(date) : "sin-fecha";
+    const rawLabel = Number.isFinite(date.getTime()) ? labelFormatter.format(date) : "Sin fecha";
+    const label = rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1);
+    const current = groups.get(key) ?? { key, label, tasks: [] };
+    current.tasks.push(task);
+    groups.set(key, current);
+  });
+
+  return Array.from(groups.values());
 }
 
 function ConsumptionTab({
@@ -868,12 +908,13 @@ function CompactTaskRow({
   };
   const completedSubtasks = task.subtasks.filter((subtask) => ["terminada", "revisada"].includes(subtask.status)).length;
   const isNewTask = task.status === "pendiente" && !task.started_at;
+  const isFinalTask = ["terminada", "revisada"].includes(task.status);
 
   return (
     <button
       id={`task-${task.id}`}
       type="button"
-      className={cn("compact-task-row", statusAccent[task.status], isNewTask && "compact-task-row--new", highlighted && "task-row--highlighted")}
+      className={cn("compact-task-row", statusAccent[task.status], isNewTask && "compact-task-row--new", isFinalTask && "compact-task-row--history", highlighted && "task-row--highlighted")}
       onClick={onOpen}
       aria-label={`Abrir tarea TP-${String(task.task_number || 0).padStart(4, "0")}: ${task.title}`}
     >
@@ -910,6 +951,7 @@ function TaskRow({
   pending,
   highlighted,
   detailMode = false,
+  readOnly = false,
   timeTrackingReady = false,
   onStatus,
   onSubtaskStatus = () => undefined,
@@ -920,6 +962,7 @@ function TaskRow({
   pending: boolean;
   highlighted?: boolean;
   detailMode?: boolean;
+  readOnly?: boolean;
   timeTrackingReady?: boolean;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
   onSubtaskStatus?: (subtask: ProductionSubtask, status: ProductionTaskStatus) => void;
@@ -1006,9 +1049,15 @@ function TaskRow({
           </section>
         ) : null}
         {["terminada", "revisada"].includes(task.status) ? (
-          <TaskTimingSummary task={task} timeTrackingReady={timeTrackingReady} />
+          <TaskTimingSummary task={task} timeTrackingReady={timeTrackingReady} defaultOpen={readOnly} />
         ) : null}
       </div>
+      {readOnly ? (
+        <div className="task-summary-readonly">
+          <strong>Resumen final</strong>
+          <span>Solo lectura</span>
+        </div>
+      ) : (
       <div className="task-row__actions grid grid-cols-2 gap-2 md:min-w-[210px] md:flex md:flex-wrap md:justify-end">
         {onConsume && !["revisada", "cancelada"].includes(task.status) ? (
           <button type="button" className="btn-quiet h-11 px-3 text-sm" disabled={pending} onClick={onConsume}>
@@ -1046,6 +1095,7 @@ function TaskRow({
           </button>
         ) : null}
       </div>
+      )}
     </div>
   );
 }
@@ -1098,7 +1148,7 @@ function DeleteTaskAuthorizationForm({
   );
 }
 
-function TaskTimingSummary({ task, timeTrackingReady }: { task: ProductionTask; timeTrackingReady: boolean }) {
+function TaskTimingSummary({ task, timeTrackingReady, defaultOpen = false }: { task: ProductionTask; timeTrackingReady: boolean; defaultOpen?: boolean }) {
   if (!timeTrackingReady) {
     return (
       <div className="task-timing task-timing--pending">
@@ -1137,7 +1187,7 @@ function TaskTimingSummary({ task, timeTrackingReady }: { task: ProductionTask; 
   }, null);
 
   return (
-    <details className="task-timing">
+    <details className="task-timing" open={defaultOpen}>
       <summary>
         <span>Historial de tiempos</span>
         <small>Tiempo de jornada: <b>{totalLabel}</b></small>

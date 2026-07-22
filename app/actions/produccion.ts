@@ -43,26 +43,26 @@ export async function listProductionWorkspaceData(): Promise<ProductionWorkspace
       .select("*")
       .neq("status", "cancelada")
       .order("created_at", { ascending: false })
-      .limit(120),
+      .limit(500),
     supabase
       .from("production_subtasks")
       .select("*")
       .order("position")
-      .limit(600),
+      .limit(2500),
     supabase
       .from("production_subtask_assignments")
       .select("*")
-      .limit(1500),
+      .limit(5000),
     supabase
       .from("production_task_attachments")
       .select("*")
       .order("created_at")
-      .limit(1000),
+      .limit(3000),
     supabase
       .from("production_work_sessions")
       .select("*")
       .order("started_at", { ascending: false })
-      .limit(3000),
+      .limit(10000),
     supabase
       .from("inventory_movements")
       .select("*, item:inventory_items(*), task:production_tasks(*)")
