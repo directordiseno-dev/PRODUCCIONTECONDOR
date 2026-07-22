@@ -60,7 +60,7 @@ export function AppHeader({
             <button
               type="button"
               className={notificationCount ? "notification-button has-alerts" : "notification-button"}
-              aria-label={notificationCount ? `${notificationCount} tareas terminadas` : "Activar notificaciones de tareas"}
+              aria-label={notificationCount ? `${notificationCount} avisos de tareas` : "Activar notificaciones de tareas"}
               onClick={async () => {
                 if ("Notification" in window && Notification.permission === "default") await Notification.requestPermission();
                 onNotificationsClick();

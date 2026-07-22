@@ -55,6 +55,7 @@ type TaskCreateSubmission = {
 type PauseTarget =
   | { kind: "task"; task: ProductionTask }
   | { kind: "subtask"; subtask: ProductionSubtask };
+type OperatorPickerMode = "action" | "task_creation";
 
 const processOptions = [
   "Soldadura",
@@ -95,6 +96,8 @@ const statusActionLabels: Partial<Record<ProductionTaskStatus, string>> = {
 };
 
 const activeOperatorStorageKey = "tecondor-production-active-operator";
+const taskSupervisorEmails = new Set(["matius-098@hotmail.com"]);
+const sharedTaskCreatorExcludedNames = new Set(["daniel agudelo", "santiago zapata"]);
 const bogotaUtcOffsetMs = 5 * 60 * 60 * 1000;
 const regularWorkWindows: Array<[number, number]> = [
   [7 * 60 + 30, 9 * 60],
@@ -118,6 +121,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
   const [highlightedTaskId, setHighlightedTaskId] = useState("");
   const [activeOperatorId, setActiveOperatorId] = useState("");
   const [operatorPickerOpen, setOperatorPickerOpen] = useState(false);
+  const [operatorPickerMode, setOperatorPickerMode] = useState<OperatorPickerMode>("action");
   const [operatorActionLabel, setOperatorActionLabel] = useState("registrar esta acción");
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [isPending, startTransition] = useTransition();
@@ -127,16 +131,37 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
   const employeeIdentityKey = data.employees.map((employee) => employee.id).join("|");
   const usesSharedProductionAccount = isSharedProductionEmail(email);
   const activeOperatorName = usesSharedProductionAccount ? activeOperator?.name || userName : userName;
+  const receivesNewTaskNotifications = usesSharedProductionAccount || isTaskSupervisorEmail(email);
+  const operatorPickerEmployees = operatorPickerMode === "task_creation"
+    ? data.employees.filter((employee) => !isExcludedSharedTaskCreator(employee))
+    : data.employees;
+  const pickerActiveOperatorId = operatorPickerEmployees.some((employee) => employee.id === activeOperatorId)
+    ? activeOperatorId
+    : "";
 
   const visibleTasks = data.tasks.filter((task) => task.status !== "cancelada");
   const activeTasks = visibleTasks.filter((task) => !["terminada", "revisada"].includes(task.status));
-  const taskNotifications = useMemo(() => data.tasks
-    .filter((task) => task.status === "terminada" && taskBelongsToUser(task, email, activeOperatorName))
-    .map((task) => ({
-      id: task.id,
-      title: `TP-${String(task.task_number || 0).padStart(4, "0")} · ${task.title}`,
-      detail: `${task.assigned_to || "Operario"} termino esta tarea`,
-    })), [activeOperatorName, data.tasks, email]);
+  const taskNotifications = useMemo(() => {
+    const newTaskNotifications = receivesNewTaskNotifications
+      ? data.tasks
+        .filter((task) => task.status === "pendiente" && !task.started_at && !taskWasCreatedByUser(task, email, activeOperatorName))
+        .map((task) => ({
+          id: task.id,
+          headline: "Nueva tarea de produccion",
+          title: `TP-${String(task.task_number || 0).padStart(4, "0")} · ${task.title}`,
+          detail: `Creada por ${createdByLabel(task.created_by)}`,
+        }))
+      : [];
+    const completedTaskNotifications = data.tasks
+      .filter((task) => task.status === "terminada" && taskBelongsToUser(task, email, activeOperatorName))
+      .map((task) => ({
+        id: task.id,
+        headline: "Tarea de produccion terminada",
+        title: `TP-${String(task.task_number || 0).padStart(4, "0")} · ${task.title}`,
+        detail: `${task.assigned_to || "Operario"} termino esta tarea`,
+      }));
+    return [...newTaskNotifications, ...completedTaskNotifications];
+  }, [activeOperatorName, data.tasks, email, receivesNewTaskNotifications]);
 
   useEffect(() => {
     if (!feedback || feedback.type === "info") return;
@@ -202,8 +227,8 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
     if (!newNotifications.length || !("Notification" in window) || Notification.permission !== "granted" || !("serviceWorker" in navigator)) return;
 
     void navigator.serviceWorker.ready.then((registration) => Promise.all(newNotifications.map((notification) => registration.showNotification(
-      "Tarea de produccion terminada",
-      { body: notification.title, tag: `production-task-${notification.id}`, data: { url: `/#task-${notification.id}` } },
+      notification.headline,
+      { body: `${notification.title}. ${notification.detail}`, tag: `production-task-${notification.id}`, data: { url: `/#task-${notification.id}` } },
     ))));
   }, [taskNotifications]);
 
@@ -249,13 +274,18 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
     });
   }
 
-  function requestTaskAttribution(label: string, action: (operatorId: string) => void) {
+  function requestTaskAttribution(
+    label: string,
+    action: (operatorId: string) => void,
+    mode: OperatorPickerMode = "action",
+  ) {
     if (!usesSharedProductionAccount) {
       action("");
       return;
     }
     pendingAttributedAction.current = action;
     setOperatorActionLabel(label);
+    setOperatorPickerMode(mode);
     setOperatorPickerOpen(true);
   }
 
@@ -363,7 +393,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
               () => createProductionTaskWithUploads(submission, operatorId),
               "Tarea creada.",
               () => { setModal(null); setActiveTab("tareas"); },
-            ))}
+            ), "task_creation")}
         />
       </WorkspaceModalPanel>
 
@@ -442,25 +472,27 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
       <WorkspaceModalPanel
         open={operatorPickerOpen}
         title={`¿Quién va a ${operatorActionLabel}?`}
-        detail="Solo se pide para crear o cambiar el estado de una tarea."
+        detail={operatorPickerMode === "task_creation"
+          ? "Selecciona quien crea esta tarea desde la cuenta compartida."
+          : "Solo se pide para crear o cambiar el estado de una tarea."}
         onClose={closeOperatorPicker}
       >
         <OperatorPicker
-          employees={data.employees}
-          activeOperatorId={activeOperatorId}
+          employees={operatorPickerEmployees}
+          activeOperatorId={pickerActiveOperatorId}
           onSelect={(employee) => {
             window.localStorage.setItem(activeOperatorStorageKey, employee.id);
             setActiveOperatorId(employee.id);
           }}
           onConfirm={() => {
-            if (!activeOperatorId) {
+            if (!pickerActiveOperatorId) {
               setFeedback({ type: "error", text: "Selecciona la persona que realiza esta acción." });
               return;
             }
             const action = pendingAttributedAction.current;
             pendingAttributedAction.current = null;
             setOperatorPickerOpen(false);
-            action?.(activeOperatorId);
+            action?.(pickerActiveOperatorId);
           }}
         />
       </WorkspaceModalPanel>
@@ -3291,8 +3323,24 @@ function employeeInitials(value: string): string {
   return words.slice(0, 2).map((word) => word.charAt(0).toUpperCase()).join("") || "?";
 }
 
+function isExcludedSharedTaskCreator(employee: ProductionEmployeeOption): boolean {
+  return sharedTaskCreatorExcludedNames.has(normalizeSearchText(employee.name));
+}
+
 function isSharedProductionEmail(value: string): boolean {
   return String(value || "").trim().toLowerCase() === "produccion@tecondor.com";
+}
+
+function isTaskSupervisorEmail(value: string): boolean {
+  return taskSupervisorEmails.has(String(value || "").trim().toLowerCase());
+}
+
+function taskWasCreatedByUser(task: ProductionTask, email: string, userName: string): boolean {
+  const createdBy = normalizeSearchText(task.created_by || "");
+  return Boolean(createdBy) && (
+    createdBy === normalizeSearchText(email)
+    || createdBy === normalizeSearchText(userName)
+  );
 }
 
 function taskBelongsToUser(task: ProductionTask, email: string, userName: string): boolean {
