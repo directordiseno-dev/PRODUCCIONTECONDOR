@@ -115,6 +115,30 @@ const fridayWorkWindows: Array<[number, number]> = [
   [13 * 60 + 45, 17 * 60],
 ];
 
+const colombianHolidays = new Set<string>([
+  // 2025
+  "2025-01-01", "2025-01-06", "2025-03-24", "2025-04-17", "2025-04-18",
+  "2025-05-01", "2025-06-02", "2025-06-23", "2025-06-30", "2025-07-20",
+  "2025-08-07", "2025-08-18", "2025-10-13", "2025-11-03", "2025-11-17",
+  "2025-12-08", "2025-12-25",
+  // 2026
+  "2026-01-01", "2026-01-12", "2026-03-23", "2026-04-02", "2026-04-03",
+  "2026-05-01", "2026-05-18", "2026-06-08", "2026-06-15", "2026-06-29",
+  "2026-07-13", "2026-07-20", "2026-08-07", "2026-08-17", "2026-10-12",
+  "2026-11-02", "2026-11-16", "2026-12-08", "2026-12-25",
+  // 2027
+  "2027-01-01", "2027-01-11", "2027-03-22", "2027-03-25", "2027-03-26",
+  "2027-05-01", "2027-05-10", "2027-05-31", "2027-06-07", "2027-07-05",
+  "2027-07-12", "2027-07-20", "2027-08-07", "2027-08-16", "2027-10-18",
+  "2027-11-01", "2027-11-15", "2027-12-08", "2027-12-25"
+]);
+
+interface ActiveSessionConflict {
+  taskTitle: string;
+  subtaskTitle: string | null;
+  onConfirm: () => void;
+}
+
 export function ProductionWorkspace({ data, email, userName }: { data: ProductionWorkspaceData; email: string; userName: string }) {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<Tab>("tareas");
@@ -132,6 +156,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
   const [operatorPickerMode, setOperatorPickerMode] = useState<OperatorPickerMode>("action");
   const [operatorActionLabel, setOperatorActionLabel] = useState("registrar esta acción");
   const [feedback, setFeedback] = useState<Feedback>(null);
+  const [sessionConflict, setSessionConflict] = useState<ActiveSessionConflict | null>(null);
   const [isPending, startTransition] = useTransition();
   const knownNotificationIds = useRef<Set<string> | null>(null);
   const pendingAttributedAction = useRef<((operatorId: string) => void) | null>(null);
@@ -268,17 +293,29 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
 
   function runAction(
     label: string,
-    action: () => Promise<unknown>,
+    action: (force?: boolean) => Promise<any>,
     success = "Listo. Cambios guardados.",
     onSuccess?: () => void,
   ) {
     startTransition(async () => {
       setFeedback({ type: "info", text: label });
       try {
-        await action();
-        setFeedback({ type: "success", text: success });
-        onSuccess?.();
-        router.refresh();
+        const res = await action(false);
+        if (res && res.status === "conflict" && res.activeSession) {
+          setFeedback(null);
+          setSessionConflict({
+            taskTitle: res.activeSession.taskTitle,
+            subtaskTitle: res.activeSession.subtaskTitle,
+            onConfirm: () => {
+              setSessionConflict(null);
+              runAction(label, () => action(true), success, onSuccess);
+            },
+          });
+        } else {
+          setFeedback({ type: "success", text: success });
+          onSuccess?.();
+          router.refresh();
+        }
       } catch (error) {
         setFeedback({ type: "error", text: error instanceof Error ? error.message : "No se pudo completar la accion." });
       }
@@ -367,7 +404,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
                 }
                 requestTaskAttribution(
                   `${statusActionLabels[status] || "actualizar"} la tarea`,
-                  (operatorId) => runAction("Actualizando tarea...", () => updateProductionTaskStatus(task.id, status, null, operatorId), "Tarea actualizada."),
+                  (operatorId) => runAction("Actualizando tarea...", (force) => updateProductionTaskStatus(task.id, status, null, operatorId, force), "Tarea actualizada."),
                 );
               }}
               onSubtaskStatus={(subtask, status) => {
@@ -377,7 +414,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
                 }
                 requestTaskAttribution(
                   `${statusActionLabels[status] || "actualizar"} la subtarea`,
-                  (operatorId) => runAction("Actualizando subtarea...", () => updateProductionSubtaskStatus(subtask.id, status, operatorId), "Subtarea actualizada."),
+                  (operatorId) => runAction("Actualizando subtarea...", (force) => updateProductionSubtaskStatus(subtask.id, status, operatorId, null, force), "Subtarea actualizada."),
                 );
               }}
               onDelete={setTaskPendingDeletion}
@@ -617,6 +654,47 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
               () => setTaskPendingDeletion(null),
             )}
           />
+        ) : null}
+      </WorkspaceModalPanel>
+
+      <WorkspaceModalPanel
+        open={Boolean(sessionConflict)}
+        title="¿Pausar proceso activo?"
+        detail="Tienes otra sesión de trabajo activa en este momento."
+        onClose={() => setSessionConflict(null)}
+      >
+        {sessionConflict ? (
+          <div className="space-y-5">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-950">
+              <span className="text-xs block font-bold uppercase tracking-wider text-amber-800">Proceso activo encontrado</span>
+              <strong className="mt-2 block text-lg font-black leading-tight text-amber-950">
+                {sessionConflict.subtaskTitle
+                  ? `${sessionConflict.subtaskTitle} — ${sessionConflict.taskTitle}`
+                  : sessionConflict.taskTitle}
+              </strong>
+              <p className="mt-2 text-sm text-amber-900 leading-relaxed">
+                {activeOperatorName}, actualmente estás registrado trabajando en la tarea arriba mencionada. Para continuar con esta nueva tarea, debemos pausar el registro de tiempo en la anterior.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                className="btn-secondary h-12"
+                onClick={() => setSessionConflict(null)}
+                disabled={isPending}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn-primary h-12"
+                onClick={() => sessionConflict.onConfirm()}
+                disabled={isPending}
+              >
+                {isPending ? "Pausando..." : "Pausar y continuar"}
+              </button>
+            </div>
+          </div>
         ) : null}
       </WorkspaceModalPanel>
     </>
@@ -1926,8 +2004,15 @@ function scheduledWorkDuration(startMs: number, endMs: number): number {
   let total = 0;
 
   while (localDayStart <= lastLocalDayStart) {
-    const dayOfWeek = new Date(localDayStart).getUTCDay();
-    const workWindows = dayOfWeek === 0 || dayOfWeek === 6
+    const dayDate = new Date(localDayStart);
+    const yyyy = dayDate.getUTCFullYear();
+    const mm = String(dayDate.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(dayDate.getUTCDate()).padStart(2, "0");
+    const dateStr = `${yyyy}-${mm}-${dd}`;
+
+    const isHoliday = colombianHolidays.has(dateStr);
+    const dayOfWeek = dayDate.getUTCDay();
+    const workWindows = isHoliday || dayOfWeek === 0 || dayOfWeek === 6
       ? []
       : dayOfWeek === 5
         ? fridayWorkWindows

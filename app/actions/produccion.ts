@@ -741,7 +741,13 @@ export async function updateProductionSubtaskAssignments(
   revalidatePath("/");
 }
 
-export async function updateProductionTaskStatus(id: string, status: ProductionTaskStatus, notes?: string | null, performedById?: string): Promise<void> {
+export async function updateProductionTaskStatus(
+  id: string,
+  status: ProductionTaskStatus,
+  notes?: string | null,
+  performedById?: string,
+  forcePauseActive?: boolean,
+): Promise<{ status: "success" | "conflict"; activeSession?: any }> {
   if (status === "cancelada") {
     throw new Error("Para eliminar una tarea debes usar la confirmacion con codigo.");
   }
@@ -772,6 +778,22 @@ export async function updateProductionTaskStatus(id: string, status: ProductionT
   }
 
   const now = new Date().toISOString();
+
+  // VALIDACION: Evitar temporizadores activos simultaneos para un mismo operario
+  if (status === "en_proceso") {
+    const employee = await resolveEmployeePerformer(supabase, performedById);
+    if (employee) {
+      const conflict = await checkActiveSessionConflict(supabase, employee.name, cleanId, null);
+      if (conflict) {
+        if (forcePauseActive) {
+          await autoPauseSession(supabase, conflict, now, performedBy);
+        } else {
+          return { status: "conflict", activeSession: conflict };
+        }
+      }
+    }
+  }
+
   const patch: Record<string, unknown> = { status, updated_at: now };
   if (status === "en_proceso" && !currentTask.started_at) patch.started_at = now;
   if (status === "pausada") patch.paused_at = now;
@@ -827,6 +849,7 @@ export async function updateProductionTaskStatus(id: string, status: ProductionT
 
   await insertTaskEvent(supabase, cleanId, status, cleanNullable(cleanNotes), performedBy);
   revalidatePath("/");
+  return { status: "success" };
 }
 
 export async function deleteProductionTask(id: string, authorizationCode: string): Promise<void> {
@@ -859,7 +882,13 @@ export async function deleteProductionTask(id: string, authorizationCode: string
   revalidatePath("/");
 }
 
-export async function updateProductionSubtaskStatus(id: string, status: ProductionTaskStatus, performedById?: string, notes?: string | null): Promise<void> {
+export async function updateProductionSubtaskStatus(
+  id: string,
+  status: ProductionTaskStatus,
+  performedById?: string,
+  notes?: string | null,
+  forcePauseActive?: boolean,
+): Promise<{ status: "success" | "conflict"; activeSession?: any }> {
   const supabase = await createClient();
   const performedBy = await resolveTaskActor(supabase, performedById, true);
   const cleanId = clean(id);
@@ -879,6 +908,21 @@ export async function updateProductionSubtaskStatus(id: string, status: Producti
 
   const taskId = String(subtask.task_id);
   const now = new Date().toISOString();
+
+  // VALIDACION: Evitar temporizadores activos simultaneos para un mismo operario
+  if (status === "en_proceso") {
+    const employee = await resolveEmployeePerformer(supabase, performedById);
+    if (employee) {
+      const conflict = await checkActiveSessionConflict(supabase, employee.name, taskId, cleanId);
+      if (conflict) {
+        if (forcePauseActive) {
+          await autoPauseSession(supabase, conflict, now, performedBy);
+        } else {
+          return { status: "conflict", activeSession: conflict };
+        }
+      }
+    }
+  }
 
   if (status === "en_proceso") {
     const employee = await resolveEmployeePerformer(supabase, performedById);
@@ -997,6 +1041,7 @@ export async function updateProductionSubtaskStatus(id: string, status: Producti
     performedBy,
   );
   revalidatePath("/");
+  return { status: "success" };
 }
 
 export async function recordProductionOvertime(
@@ -1488,6 +1533,75 @@ async function resolvePerformerName(
 
 function normalizeSearchText(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es").trim();
+}
+
+async function checkActiveSessionConflict(
+  supabase: any,
+  employeeName: string,
+  currentTaskId: string,
+  currentSubtaskId: string | null,
+): Promise<{ taskId: string; subtaskId: string | null; taskTitle: string; subtaskTitle: string | null } | null> {
+  const { data: activeSessions, error } = await supabase
+    .from("production_work_sessions")
+    .select("*, task:production_tasks(title, task_number), subtask:production_subtasks(title)")
+    .is("ended_at", null);
+
+  if (error || !activeSessions) return null;
+
+  const conflictSession = activeSessions.find((session: any) => {
+    const isSameOperator = normalizeSearchText(session.started_by) === normalizeSearchText(employeeName);
+    const isCurrent = currentSubtaskId 
+      ? session.subtask_id === currentSubtaskId
+      : (session.task_id === currentTaskId && !session.subtask_id);
+    return isSameOperator && !isCurrent;
+  });
+
+  if (!conflictSession) return null;
+
+  return {
+    taskId: conflictSession.task_id,
+    subtaskId: conflictSession.subtask_id,
+    taskTitle: conflictSession.task?.title || "Tarea sin titulo",
+    subtaskTitle: conflictSession.subtask?.title || null,
+  };
+}
+
+async function autoPauseSession(
+  supabase: any,
+  conflict: { taskId: string; subtaskId: string | null; taskTitle: string; subtaskTitle: string | null },
+  endedAt: string,
+  performedBy: string,
+): Promise<void> {
+  const endReason = "Pausa: Auto-pausada por inicio de otra tarea";
+  await closeWorkSessions(supabase, conflict.taskId, conflict.subtaskId, endedAt, endReason, performedBy);
+
+  if (conflict.subtaskId) {
+    await supabase
+      .from("production_subtasks")
+      .update({ status: "pausada", updated_at: endedAt })
+      .eq("id", conflict.subtaskId);
+
+    await insertTaskEvent(
+      supabase,
+      conflict.taskId,
+      "pausada",
+      `Subtarea "${conflict.subtaskTitle || "Sin titulo"}" auto-pausada por inicio de otra tarea`,
+      performedBy,
+    );
+  } else {
+    await supabase
+      .from("production_tasks")
+      .update({ status: "pausada", paused_at: endedAt, updated_at: endedAt })
+      .eq("id", conflict.taskId);
+
+    await insertTaskEvent(
+      supabase,
+      conflict.taskId,
+      "pausada",
+      `Tarea "${conflict.taskTitle || "Sin titulo"}" auto-pausada por inicio de otra tarea`,
+      performedBy,
+    );
+  }
 }
 
 async function resolveEmployeePerformer(
