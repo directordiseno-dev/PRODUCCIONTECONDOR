@@ -2195,6 +2195,52 @@ function WorkspaceModalPanel({
   );
 }
 
+function getEmployeeImageUrl(name: string): string {
+  const normalized = name
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+
+  if (normalized.includes("luis miguel ochoa")) {
+    return "/employees/luis_miguel_ochoa.jpg";
+  }
+  if (normalized.includes("luis david noriega")) {
+    return "/employees/luis_david_noriega.jpg";
+  }
+  if (normalized.includes("daniel")) {
+    return "/employees/daniel.jpg";
+  }
+  if (normalized.includes("santiago")) {
+    return "/employees/santiago.jpg";
+  }
+  if (normalized.includes("mateo")) {
+    return "/employees/mateo.jpg";
+  }
+
+  return `/employees/${normalized.replace(/\s+/g, "_")}.jpg`;
+}
+
+function EmployeeAvatar({ name }: { name: string }) {
+  const [hasError, setHasError] = useState(false);
+  const imageUrl = getEmployeeImageUrl(name);
+
+  return (
+    <span>
+      {!hasError ? (
+        <img
+          src={imageUrl}
+          alt={name}
+          onError={() => setHasError(true)}
+          style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: "inherit", display: "block" }}
+        />
+      ) : (
+        employeeInitials(name)
+      )}
+    </span>
+  );
+}
+
 function OperatorPicker({
   employees,
   activeOperatorId,
@@ -2222,7 +2268,7 @@ function OperatorPicker({
               className={cn("operator-picker__person", employee.id === activeOperatorId && "is-active")}
               onClick={() => onSelect(employee)}
             >
-              <span>{employeeInitials(employee.name)}</span>
+              <EmployeeAvatar name={employee.name} />
               <div>
                 <strong>{employee.name}</strong>
                 <small>{employee.roles.includes("ingeniero") ? "Ingeniero" : "Operario"}</small>
