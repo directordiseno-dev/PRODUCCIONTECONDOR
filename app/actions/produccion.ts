@@ -225,6 +225,40 @@ export async function listProductionWorkspaceData(): Promise<ProductionWorkspace
       }
     }
   }
+  // Sincronizar automáticamente cualquier responsable de subtarea al grupo de responsables de la tarea principal
+  if (taskExtensionsReady && tasksRes.data) {
+    for (const task of tasksRes.data) {
+      const subtaskEmployeeNames = subtasks
+        .filter((s: any) => s.task_id === task.id)
+        .flatMap((s: any) => s.assignments.map((a: any) => String(a.employee_name || "").trim()))
+        .filter(Boolean);
+
+      if (subtaskEmployeeNames.length > 0) {
+        const currentNames = String(task.assigned_to || "")
+          .split(",")
+          .map((n: string) => n.trim())
+          .filter(Boolean);
+
+        let hasNew = false;
+        for (const name of subtaskEmployeeNames) {
+          if (!currentNames.some((n: string) => n.toLowerCase() === name.toLowerCase())) {
+            currentNames.push(name);
+            hasNew = true;
+          }
+        }
+
+        if (hasNew) {
+          const updatedAssignedTo = currentNames.join(", ");
+          task.assigned_to = updatedAssignedTo;
+          
+          await supabase
+            .from("production_tasks")
+            .update({ assigned_to: updatedAssignedTo, updated_at: new Date().toISOString() })
+            .eq("id", task.id);
+        }
+      }
+    }
+  }
 
   return {
     schemaReady: true,

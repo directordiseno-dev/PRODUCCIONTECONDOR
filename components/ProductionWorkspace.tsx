@@ -1270,7 +1270,7 @@ function TaskRow({
   const overtimeSessionsToday = (task.overtime_sessions ?? []).filter((session) => isTodayInBogota(session.ended_at || session.started_at));
   const currentPause = task.status === "pausada" ? latestPauseSession(task.work_sessions) : null;
   return (
-    <div id={`task-${task.id}`} className={cn("task-row grid gap-3 rounded-2xl border border-l-4 px-3 py-3 shadow-sm transition hover:shadow-md sm:px-4 sm:py-4 md:grid-cols-[1fr_auto] md:items-center", statusAccent[task.status], statusSurface[task.status], isPartialTask && "task-row--partial", highlighted && "task-row--highlighted", detailMode && "task-row--detail")}>
+    <div id={`task-${task.id}`} className={cn("task-row grid gap-3 rounded-2xl border border-l-4 px-3 py-3 shadow-sm transition hover:shadow-md sm:px-4 sm:py-4 md:items-center", statusAccent[task.status], statusSurface[task.status], isPartialTask && "task-row--partial", highlighted && "task-row--highlighted", detailMode ? "task-row--detail grid-cols-1" : "md:grid-cols-[1fr_auto]")}>
       <div className="min-w-0">
         <div className="task-row__badges flex flex-wrap items-center gap-2">
           {!detailMode ? <span className="rounded-full bg-neutral-950 px-2.5 py-1 font-mono text-xs font-black text-white">TP-{String(task.task_number || 0).padStart(4, "0")}</span> : null}
@@ -1367,7 +1367,7 @@ function TaskRow({
           ) : null}
         </div>
       ) : (
-      <div className="task-row__actions grid grid-cols-2 gap-2 md:min-w-[210px] md:flex md:flex-wrap md:justify-end">
+      <div className={cn("task-row__actions grid grid-cols-2 gap-2 md:min-w-[210px] md:flex md:flex-wrap md:justify-end", detailMode && "w-full mt-4 md:justify-start")}>
         {canEditCostCenters && onEditCostCenters ? (
           <button type="button" className="btn-secondary h-11 px-3 text-sm" disabled={pending} onClick={onEditCostCenters}>
             Cambiar CC
