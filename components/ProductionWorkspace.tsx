@@ -2208,6 +2208,9 @@ function getEmployeeImageUrl(name: string): string {
   if (normalized.includes("luis david noriega")) {
     return "/employees/luis_david_noriega.jpg";
   }
+  if (normalized.includes("jaime tirado")) {
+    return "/employees/jaime_tirado.jpg";
+  }
   if (normalized.includes("daniel")) {
     return "/employees/daniel.jpg";
   }
