@@ -832,7 +832,8 @@ button { touch-action: manipulation; }
 
 @media (min-width: 1024px) {
   .production-app { height: 100dvh; overflow: hidden; }
-  .production-main { height: calc(100dvh - 51px - var(--safe-top)); padding: 7px calc(10px + var(--safe-right)) 9px calc(10px + var(--safe-left)); overflow: hidden; }
+  .production-main { height: calc(100dvh - 51px - var(--safe-top)); padding: 7px calc(10px + var(--safe-right)) 9px calc(10px + var(--safe-left)); overflow: hidden; max-width: 1200px; margin: 0 auto; }
+  .plant-header__inner { max-width: 1200px; margin: 0 auto; padding-right: 24px; padding-left: 24px; }
   .production-workspace, .production-console { height: 100%; }
   .production-console { display: block; }
   .production-tabs {
@@ -1131,4 +1132,90 @@ button { touch-action: manipulation; }
 .subtask-row__actions button:hover {
   transform: scale(1.02);
   box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
+/* Optimización de escala visual para PC / Monitor de Planta */
+@media (min-width: 1024px) {
+  /* Filtros y cabecera de la sección */
+  .task-filters {
+    gap: 12px !important;
+    margin-bottom: 14px !important;
+    padding: 4px 2px !important;
+  }
+  .task-filters button {
+    min-height: 48px !important;
+    padding: 0 18px 0 22px !important;
+    font-size: 14px !important;
+    border-radius: 999px !important;
+  }
+  .task-filters button b {
+    min-width: 26px !important;
+    height: 26px !important;
+    font-size: 12px !important;
+  }
+
+  /* Buscador secundario */
+  .task-secondary-filters {
+    gap: 10px !important;
+    margin-bottom: 8px !important;
+  }
+  .task-secondary-filters label {
+    padding: 8px 10px 8px 14px !important;
+    border-radius: 12px !important;
+  }
+  .task-secondary-filters span {
+    font-size: 11px !important;
+  }
+  .task-secondary-filters select {
+    font-size: 12px !important;
+    min-height: 38px !important;
+  }
+
+  /* Listado de tareas: filas más grandes y legibles */
+  .compact-task-row {
+    padding: 16px 20px !important;
+    min-height: 105px !important;
+    gap: 16px !important;
+    border-radius: 16px !important;
+    box-shadow: 0 4px 15px rgba(15, 23, 42, 0.05) !important;
+  }
+  .compact-task-row__main {
+    gap: 8px !important;
+  }
+  .compact-task-row__main > strong {
+    font-size: 19px !important;
+    font-weight: 850 !important;
+    color: #18181b !important;
+  }
+  .compact-task-row__notes {
+    font-size: 14px !important;
+    margin-top: 6px !important;
+    line-height: 1.5 !important;
+  }
+  .compact-task-row__notes span {
+    font-size: 14px !important;
+  }
+  .compact-task-row__meta {
+    font-size: 13px !important;
+    margin-top: 6px !important;
+    gap: 10px !important;
+  }
+  .compact-task-row__meta > span + span::before {
+    margin-right: 10px !important;
+  }
+  .compact-task-row__progress {
+    min-width: 220px !important;
+    padding: 10px 14px !important;
+    border-radius: 12px !important;
+  }
+  
+  /* Ajuste de cabecera de panel */
+  .production-commandbar {
+    padding: 14px 18px !important;
+    gap: 12px !important;
+  }
+  .production-commandbar__title h1 {
+    font-size: 24px !important;
+    font-weight: 950 !important;
+  }
 }
