@@ -834,14 +834,18 @@ export async function updateProductionSubtaskStatus(id: string, status: Producti
   const now = new Date().toISOString();
 
   if (status === "en_proceso") {
-    const { data: currentAssignments, error: assignmentsErr } = await supabase
-      .from("production_subtask_assignments")
-      .select("id")
-      .eq("subtask_id", cleanId);
-    
-    if (!assignmentsErr && (!currentAssignments || currentAssignments.length === 0)) {
-      const employee = await resolveEmployeePerformer(supabase, performedById);
-      if (employee) {
+    const employee = await resolveEmployeePerformer(supabase, performedById);
+    if (employee) {
+      const { data: currentAssignments } = await supabase
+        .from("production_subtask_assignments")
+        .select("employee_id, employee_name")
+        .eq("subtask_id", cleanId);
+
+      const alreadyAssigned = currentAssignments?.some(
+        (a: any) => a.employee_id === employee.id || normalizeSearchText(a.employee_name) === normalizeSearchText(employee.name)
+      );
+
+      if (!alreadyAssigned) {
         const { error: assignErr } = await supabase
           .from("production_subtask_assignments")
           .insert({
@@ -849,27 +853,27 @@ export async function updateProductionSubtaskStatus(id: string, status: Producti
             employee_id: employee.id,
             employee_name: employee.name,
           });
-        
+
         if (!assignErr) {
           const { data: task, error: taskErr } = await supabase
             .from("production_tasks")
             .select("assigned_to")
             .eq("id", taskId)
             .single();
-          
+
           if (!taskErr && task) {
             const currentNames = (task.assigned_to || "")
               .split(",")
               .map((n: string) => n.trim())
               .filter(Boolean);
-            
+
             if (!currentNames.some((n: string) => n.toLowerCase() === employee.name.toLowerCase())) {
               currentNames.push(employee.name);
               await supabase
                 .from("production_tasks")
                 .update({ assigned_to: currentNames.join(", "), updated_at: now })
                 .eq("id", taskId);
-              
+
               await insertTaskEvent(
                 supabase,
                 taskId,
