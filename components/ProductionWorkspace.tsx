@@ -135,22 +135,23 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
   const [isPending, startTransition] = useTransition();
   const knownNotificationIds = useRef<Set<string> | null>(null);
   const pendingAttributedAction = useRef<((operatorId: string) => void) | null>(null);
-  const activeOperator = data.employees.find((employee) => employee.id === activeOperatorId) ?? null;
+  const activeOperator = useMemo(() => data.employees.find((employee) => employee.id === activeOperatorId) ?? null, [data.employees, activeOperatorId]);
   const employeeIdentityKey = data.employees.map((employee) => employee.id).join("|");
   const usesSharedProductionAccount = isSharedProductionEmail(email);
   const activeOperatorName = usesSharedProductionAccount ? activeOperator?.name || userName : userName;
   const receivesNewTaskNotifications = usesSharedProductionAccount || isTaskSupervisorEmail(email);
   const canEditTaskCostCenters = isTaskCostCenterEditor(email, userName) && data.advancedPlanningReady;
   const canEditTaskResponsibles = isTaskCostCenterEditor(email, userName);
-  const operatorPickerEmployees = operatorPickerMode === "task_creation"
+  const operatorPickerEmployees = useMemo(() => operatorPickerMode === "task_creation"
     ? data.employees.filter((employee) => !isExcludedSharedTaskCreator(employee))
-    : data.employees;
+    : data.employees, [data.employees, operatorPickerMode]);
   const pickerActiveOperatorId = operatorPickerEmployees.some((employee) => employee.id === activeOperatorId)
     ? activeOperatorId
     : "";
 
-  const visibleTasks = data.tasks.filter((task) => task.status !== "cancelada");
-  const activeTasks = visibleTasks.filter((task) => !["terminada", "revisada"].includes(task.status));
+  const visibleTasks = useMemo(() => data.tasks.filter((task) => task.status !== "cancelada"), [data.tasks]);
+  const activeTasks = useMemo(() => visibleTasks.filter((task) => !["terminada", "revisada"].includes(task.status)), [visibleTasks]);
+  const activeItems = useMemo(() => data.items.filter((item) => item.active), [data.items]);
   const taskNotifications = useMemo(() => {
     const newTaskNotifications = receivesNewTaskNotifications
       ? data.tasks
@@ -336,7 +337,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
           <div className="production-console__content">
           {activeTab === "inventario" ? (
             <InventoryTab
-              items={data.items.filter((item) => item.active)}
+              items={activeItems}
               pending={isPending}
               onMovement={() => setModal("movement")}
               onEdit={(item) => { setEditingItem(item); setModal("edit-item"); }}
@@ -390,7 +391,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
           {activeTab === "consumos" ? (
             <ConsumptionTab
               tasks={activeTasks}
-              items={data.items.filter((item) => item.active)}
+              items={activeItems}
               materials={data.task_materials}
               movements={data.movements}
             />
@@ -428,7 +429,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
         <ConsumptionForm
           key={consumptionTaskId || "consumo-manual"}
           tasks={activeTasks}
-          items={data.items.filter((item) => item.active)}
+          items={activeItems}
           defaultTaskId={consumptionTaskId}
           pending={isPending}
           onCancel={() => setModal(null)}
@@ -459,7 +460,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
 
       <WorkspaceModalPanel open={modal === "movement"} title="Movimiento de inventario" detail="Registra una entrada, salida o ajuste manual." onClose={() => setModal(null)} wide>
         <InventoryMovementForm
-          items={data.items.filter((item) => item.active)}
+          items={activeItems}
           costCenters={data.cost_centers}
           pending={isPending}
           onCancel={() => setModal(null)}
@@ -900,17 +901,17 @@ function TasksTab({
   const [responsibleFilter, setResponsibleFilter] = useState("");
   const [costCenterFilter, setCostCenterFilter] = useState("");
   const [selectedTaskId, setSelectedTaskId] = useState("");
-  const historyTasks = tasks
+  const historyTasks = useMemo(() => tasks
     .filter((task) => ["terminada", "revisada"].includes(task.status))
-    .sort((left, right) => Date.parse(right.finished_at || right.updated_at) - Date.parse(left.finished_at || left.updated_at));
-  const statusFilteredTasks = filter === "todas"
+    .sort((left, right) => Date.parse(right.finished_at || right.updated_at) - Date.parse(left.finished_at || left.updated_at)), [tasks]);
+  const statusFilteredTasks = useMemo(() => filter === "todas"
     ? tasks
     : filter === "activas"
-    ? tasks.filter((task) => !["terminada", "revisada", "cancelada"].includes(task.status))
-    : filter === "historial"
-      ? historyTasks
-      : tasks.filter((task) => task.status === filter);
-  const filteredTasks = statusFilteredTasks.filter((task) => {
+      ? tasks.filter((task) => !["terminada", "revisada", "cancelada"].includes(task.status))
+      : filter === "historial"
+        ? historyTasks
+        : tasks.filter((task) => task.status === filter), [filter, historyTasks, tasks]);
+  const filteredTasks = useMemo(() => statusFilteredTasks.filter((task) => {
     const responsibleNames = [
       ...(task.assigned_to || "").split(","),
       ...task.subtasks.flatMap((subtask) => subtask.assignments.map((assignment) => assignment.employee_name)),
@@ -921,26 +922,26 @@ function TasksTab({
     ]));
     return (!responsibleFilter || responsibleNames.includes(normalizeSearchText(responsibleFilter)))
       && (!costCenterFilter || taskCostCenters.includes(costCenterFilter));
-  });
-  const activeCount = tasks.filter((task) => !["terminada", "revisada", "cancelada"].includes(task.status)).length;
-  const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null;
+  }), [costCenterFilter, responsibleFilter, statusFilteredTasks]);
+  const activeCount = useMemo(() => tasks.filter((task) => !["terminada", "revisada", "cancelada"].includes(task.status)).length, [tasks]);
+  const selectedTask = useMemo(() => tasks.find((task) => task.id === selectedTaskId) ?? null, [selectedTaskId, tasks]);
   const selectedTaskIsFinal = Boolean(selectedTask && ["terminada", "revisada"].includes(selectedTask.status));
-  const historyGroups = groupTasksByFinishedDay(filteredTasks);
-  const responsibleOptions = Array.from(new Set(tasks.flatMap((task) => [
+  const historyGroups = useMemo(() => groupTasksByFinishedDay(filteredTasks), [filteredTasks]);
+  const responsibleOptions = useMemo(() => Array.from(new Set(tasks.flatMap((task) => [
     ...(task.assigned_to || "").split(","),
     ...task.subtasks.flatMap((subtask) => subtask.assignments.map((assignment) => assignment.employee_name)),
-  ]).map((name) => name.trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right));
-  const costCenterOptions = Array.from(new Set(tasks.flatMap((task) => [
+  ]).map((name) => name.trim()).filter(Boolean))).sort((left, right) => left.localeCompare(right)), [tasks]);
+  const costCenterOptions = useMemo(() => Array.from(new Set(tasks.flatMap((task) => [
     ...(task.cost_center_codes ?? []),
     ...task.subtasks.flatMap((subtask) => subtask.cost_center_codes ?? []),
-  ]))).sort();
-  const filters: Array<["todas" | "activas" | "historial" | ProductionTaskStatus, string, number]> = [
+  ]))).sort(), [tasks]);
+  const filters: Array<["todas" | "activas" | "historial" | ProductionTaskStatus, string, number]> = useMemo(() => [
     ["activas", "Activas", activeCount],
     ["pendiente", "Pendientes", tasks.filter((task) => task.status === "pendiente").length],
     ["en_proceso", "En proceso", tasks.filter((task) => task.status === "en_proceso").length],
     ["pausada", "Pausadas", tasks.filter((task) => task.status === "pausada").length],
     ["historial", "Historial", historyTasks.length],
-  ];
+  ], [activeCount, historyTasks.length, tasks]);
 
   useEffect(() => {
     if (!highlightedTaskId) return;
@@ -1446,8 +1447,12 @@ function TaskRow({
 
 function SubtaskProgressBar({ subtasks, compact = false }: { subtasks: ProductionSubtask[]; compact?: boolean }) {
   const total = subtasks.length;
-  const completed = subtasks.filter((subtask) => ["terminada", "revisada"].includes(subtask.status)).length;
-  const pending = subtasks.filter((subtask) => subtask.status === "pendiente").length;
+  let completed = 0;
+  let pending = 0;
+  subtasks.forEach((subtask) => {
+    if (["terminada", "revisada"].includes(subtask.status)) completed += 1;
+    else if (subtask.status === "pendiente") pending += 1;
+  });
   const active = Math.max(0, total - completed - pending);
   const started = total - pending;
   const startedPercent = total ? Math.round((started / total) * 100) : 0;

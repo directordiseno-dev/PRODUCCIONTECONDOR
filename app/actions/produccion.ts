@@ -166,6 +166,11 @@ export async function listProductionWorkspaceData(): Promise<ProductionWorkspace
   const taskCostCenters = normalizeCostCenterAssignments(advancedPlanningReady ? taskCostCentersRes.data ?? [] : []);
   const subtaskCostCenters = normalizeCostCenterAssignments(advancedPlanningReady ? subtaskCostCentersRes.data ?? [] : []);
   const subtasks = normalizeProductionSubtasks(taskExtensionsReady ? subtasksRes.data ?? [] : [], assignments, attachments, workSessions, subtaskCostCenters);
+  const firstWorkSessionBySubtaskId = new Map<string, ProductionWorkSession>();
+  for (const session of workSessions) {
+    if (!session.subtask_id || firstWorkSessionBySubtaskId.has(session.subtask_id)) continue;
+    firstWorkSessionBySubtaskId.set(session.subtask_id, session);
+  }
 
   // Reparar de forma automática cualquier subtarea en proceso que haya quedado sin operario asignado
   const unassignedSubtasks = subtasks.filter(s => s.status === "en_proceso" && (!s.assignments || s.assignments.length === 0));
@@ -177,7 +182,7 @@ export async function listProductionWorkspaceData(): Promise<ProductionWorkspace
 
     if (employees && employees.length > 0) {
       for (const subtask of unassignedSubtasks) {
-        const session = workSessions.find(ws => ws.subtask_id === subtask.id);
+        const session = firstWorkSessionBySubtaskId.get(subtask.id);
         const startedBy = clean(session?.started_by);
         if (startedBy) {
           const normPerformer = normalizeSearchText(startedBy);
@@ -227,11 +232,19 @@ export async function listProductionWorkspaceData(): Promise<ProductionWorkspace
   }
   // Sincronizar automáticamente cualquier responsable de subtarea al grupo de responsables de la tarea principal
   if (taskExtensionsReady && tasksRes.data) {
-    for (const task of tasksRes.data) {
-      const subtaskEmployeeNames = subtasks
-        .filter((s: any) => s.task_id === task.id)
-        .flatMap((s: any) => s.assignments.map((a: any) => String(a.employee_name || "").trim()))
+    const subtaskEmployeeNamesByTaskId = new Map<string, string[]>();
+    for (const subtask of subtasks) {
+      const names = subtask.assignments
+        .map((assignment) => String(assignment.employee_name || "").trim())
         .filter(Boolean);
+      if (!names.length) continue;
+      const current = subtaskEmployeeNamesByTaskId.get(String(subtask.task_id));
+      if (current) current.push(...names);
+      else subtaskEmployeeNamesByTaskId.set(String(subtask.task_id), names);
+    }
+
+    for (const task of tasksRes.data) {
+      const subtaskEmployeeNames = subtaskEmployeeNamesByTaskId.get(String(task.id)) ?? [];
 
       if (subtaskEmployeeNames.length > 0) {
         const currentNames = String(task.assigned_to || "")
@@ -1520,6 +1533,12 @@ function normalizeInventoryItems(rows: unknown[]): InventoryItem[] {
   });
 }
 
+function pushToMap<K, V>(map: Map<K, V[]>, key: K, value: V): void {
+  const current = map.get(key);
+  if (current) current.push(value);
+  else map.set(key, [value]);
+}
+
 function normalizeProductionTasks(
   rows: unknown[],
   subtasks: ProductionSubtask[] = [],
@@ -1528,20 +1547,36 @@ function normalizeProductionTasks(
   overtimeSessions: ProductionOvertimeSession[] = [],
   costCenterAssignments: ProductionCostCenterAssignment[] = [],
 ): ProductionTask[] {
+  const subtasksByTaskId = new Map<string, ProductionSubtask[]>();
+  subtasks.forEach((subtask) => pushToMap(subtasksByTaskId, String(subtask.task_id), subtask));
+  const attachmentsByTaskId = new Map<string, ProductionTaskAttachment[]>();
+  attachments.forEach((attachment) => {
+    if (attachment.task_id && !attachment.subtask_id) pushToMap(attachmentsByTaskId, String(attachment.task_id), attachment);
+  });
+  const workSessionsByTaskId = new Map<string, ProductionWorkSession[]>();
+  workSessions.forEach((session) => {
+    if (session.task_id && !session.subtask_id) pushToMap(workSessionsByTaskId, String(session.task_id), session);
+  });
+  const overtimeSessionsByTaskId = new Map<string, ProductionOvertimeSession[]>();
+  overtimeSessions.forEach((session) => pushToMap(overtimeSessionsByTaskId, String(session.task_id), session));
+  const costCenterCodesByTaskId = new Map<string, string[]>();
+  costCenterAssignments.forEach((assignment) => pushToMap(costCenterCodesByTaskId, String(assignment.task_id), assignment.cost_center_code));
+
   return rows.map((row) => {
     const value = row as ProductionTask;
+    const taskId = String(value.id);
     return {
       ...value,
       task_number: Number(value.task_number || 0),
       planned_quantity: Number(value.planned_quantity || 0),
       completed_quantity: Number(value.completed_quantity || 0),
       estimated_minutes: Number(value.estimated_minutes || 0),
-      subtasks: subtasks.filter((subtask) => subtask.task_id === value.id),
-      attachments: attachments.filter((attachment) => attachment.task_id === value.id && !attachment.subtask_id),
-      work_sessions: workSessions.filter((session) => session.task_id === value.id && !session.subtask_id),
-      overtime_sessions: overtimeSessions.filter((session) => session.task_id === value.id),
+      subtasks: subtasksByTaskId.get(taskId) ?? [],
+      attachments: attachmentsByTaskId.get(taskId) ?? [],
+      work_sessions: workSessionsByTaskId.get(taskId) ?? [],
+      overtime_sessions: overtimeSessionsByTaskId.get(taskId) ?? [],
       cost_center_codes: uniqueCleanStrings([
-        ...costCenterAssignments.filter((assignment) => assignment.task_id === value.id).map((assignment) => assignment.cost_center_code),
+        ...(costCenterCodesByTaskId.get(taskId) ?? []),
         value.cost_center_code,
       ]),
     };
@@ -1585,17 +1620,31 @@ function normalizeProductionSubtasks(
   workSessions: ProductionWorkSession[],
   costCenterAssignments: ProductionCostCenterAssignment[],
 ): ProductionSubtask[] {
+  const assignmentsBySubtaskId = new Map<string, ProductionSubtaskAssignment[]>();
+  assignments.forEach((assignment) => pushToMap(assignmentsBySubtaskId, String(assignment.subtask_id), assignment));
+  const attachmentsBySubtaskId = new Map<string, ProductionTaskAttachment[]>();
+  attachments.forEach((attachment) => {
+    if (attachment.subtask_id) pushToMap(attachmentsBySubtaskId, String(attachment.subtask_id), attachment);
+  });
+  const workSessionsBySubtaskId = new Map<string, ProductionWorkSession[]>();
+  workSessions.forEach((session) => {
+    if (session.subtask_id) pushToMap(workSessionsBySubtaskId, String(session.subtask_id), session);
+  });
+  const costCenterCodesBySubtaskId = new Map<string, string[]>();
+  costCenterAssignments.forEach((assignment) => {
+    if (assignment.subtask_id) pushToMap(costCenterCodesBySubtaskId, String(assignment.subtask_id), assignment.cost_center_code);
+  });
+
   return rows.map((row) => {
     const value = row as ProductionSubtask;
+    const subtaskId = String(value.id);
     return {
       ...value,
       position: Number(value.position || 0),
-      assignments: assignments.filter((assignment) => assignment.subtask_id === value.id),
-      attachments: attachments.filter((attachment) => attachment.subtask_id === value.id),
-      work_sessions: workSessions.filter((session) => session.subtask_id === value.id),
-      cost_center_codes: uniqueCleanStrings(costCenterAssignments
-        .filter((assignment) => assignment.subtask_id === value.id)
-        .map((assignment) => assignment.cost_center_code)),
+      assignments: assignmentsBySubtaskId.get(subtaskId) ?? [],
+      attachments: attachmentsBySubtaskId.get(subtaskId) ?? [],
+      work_sessions: workSessionsBySubtaskId.get(subtaskId) ?? [],
+      cost_center_codes: uniqueCleanStrings(costCenterCodesBySubtaskId.get(subtaskId) ?? []),
     };
   });
 }
