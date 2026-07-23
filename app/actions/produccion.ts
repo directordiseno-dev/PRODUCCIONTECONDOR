@@ -785,6 +785,40 @@ export async function updateProductionTaskStatus(id: string, status: ProductionT
   }
 
   if (status === "en_proceso") {
+    const employee = await resolveEmployeePerformer(supabase, performedById);
+    if (employee) {
+      const { data: task } = await supabase
+        .from("production_tasks")
+        .select("assigned_to")
+        .eq("id", cleanId)
+        .single();
+
+      if (task) {
+        const currentNames = (task.assigned_to || "")
+          .split(",")
+          .map((n: string) => n.trim())
+          .filter(Boolean);
+
+        if (!currentNames.some((n: string) => n.toLowerCase() === employee.name.toLowerCase())) {
+          currentNames.push(employee.name);
+          await supabase
+            .from("production_tasks")
+            .update({ assigned_to: currentNames.join(", "), updated_at: now })
+            .eq("id", cleanId);
+
+          await insertTaskEvent(
+            supabase,
+            cleanId,
+            "responsables_actualizados",
+            currentNames.join(", "),
+            performedBy,
+          );
+        }
+      }
+    }
+  }
+
+  if (status === "en_proceso") {
     await openWorkSession(supabase, cleanId, null, now, performedBy);
   } else if (["pausada", "terminada"].includes(status)) {
     const endReason = status === "pausada" ? `Pausa: ${cleanNotes}` : status;
