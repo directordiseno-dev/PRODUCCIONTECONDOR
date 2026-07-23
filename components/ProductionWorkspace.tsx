@@ -14,6 +14,7 @@ import {
   updateInventoryItem,
   updateProductionTaskCostCenters,
   updateProductionTaskResponsibles,
+  updateProductionSubtaskAssignments,
   updateProductionSubtaskStatus,
   updateProductionTaskStatus,
 } from "@/app/actions/produccion";
@@ -122,6 +123,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [taskCostCenterPendingEdit, setTaskCostCenterPendingEdit] = useState<ProductionTask | null>(null);
   const [taskResponsiblePendingEdit, setTaskResponsiblePendingEdit] = useState<ProductionTask | null>(null);
+  const [subtaskResponsiblePendingEdit, setSubtaskResponsiblePendingEdit] = useState<{ subtask: ProductionSubtask; task: ProductionTask } | null>(null);
   const [taskPendingDeletion, setTaskPendingDeletion] = useState<ProductionTask | null>(null);
   const [pauseTarget, setPauseTarget] = useState<PauseTarget | null>(null);
   const [highlightedTaskId, setHighlightedTaskId] = useState("");
@@ -355,6 +357,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
               onConsumeTask={openConsumption}
               onEditCostCenters={setTaskCostCenterPendingEdit}
               onEditResponsibles={setTaskResponsiblePendingEdit}
+              onEditSubtaskResponsibles={(subtask, task) => setSubtaskResponsiblePendingEdit({ subtask, task })}
               onStatus={(task, status) => {
                 if (status === "pausada") {
                   setPauseTarget({ kind: "task", task });
@@ -506,6 +509,31 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
               () => updateProductionTaskResponsibles(taskResponsiblePendingEdit.id, names),
               "Responsables actualizados.",
               () => setTaskResponsiblePendingEdit(null),
+            )}
+          />
+        ) : null}
+      </WorkspaceModalPanel>
+
+      <WorkspaceModalPanel
+        open={Boolean(subtaskResponsiblePendingEdit)}
+        title="Cambiar operarios de la subtarea"
+        detail="Solo Matius, Daniel o Santiago pueden cambiar los operarios asignados."
+        onClose={() => setSubtaskResponsiblePendingEdit(null)}
+        wide
+      >
+        {subtaskResponsiblePendingEdit ? (
+          <SubtaskResponsibleEditForm
+            key={subtaskResponsiblePendingEdit.subtask.id}
+            subtask={subtaskResponsiblePendingEdit.subtask}
+            task={subtaskResponsiblePendingEdit.task}
+            employees={data.employees}
+            pending={isPending}
+            onCancel={() => setSubtaskResponsiblePendingEdit(null)}
+            onSubmit={(assignments) => runAction(
+              "Actualizando operarios...",
+              () => updateProductionSubtaskAssignments(subtaskResponsiblePendingEdit.subtask.id, assignments),
+              "Operarios actualizados.",
+              () => setSubtaskResponsiblePendingEdit(null),
             )}
           />
         ) : null}
@@ -842,6 +870,7 @@ function TasksTab({
   onConsumeTask,
   onEditCostCenters,
   onEditResponsibles,
+  onEditSubtaskResponsibles,
   onStatus,
   onSubtaskStatus,
   onDelete,
@@ -858,6 +887,7 @@ function TasksTab({
   onConsumeTask: (taskId?: string) => void;
   onEditCostCenters: (task: ProductionTask) => void;
   onEditResponsibles: (task: ProductionTask) => void;
+  onEditSubtaskResponsibles: (subtask: ProductionSubtask, task: ProductionTask) => void;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
   onSubtaskStatus: (subtask: ProductionSubtask, status: ProductionTaskStatus) => void;
   onDelete: (task: ProductionTask) => void;
@@ -1014,6 +1044,10 @@ function TasksTab({
           onEditResponsibles={() => {
             setSelectedTaskId("");
             onEditResponsibles(selectedTask);
+          }}
+          onEditSubtaskResponsibles={(subtask) => {
+            setSelectedTaskId("");
+            onEditSubtaskResponsibles(subtask, selectedTask);
           }}
           onRecordOvertime={() => onRecordOvertime(selectedTask)}
         />
@@ -1186,6 +1220,7 @@ function TaskRow({
   onConsume,
   onEditCostCenters,
   onEditResponsibles,
+  onEditSubtaskResponsibles,
   onRecordOvertime,
 }: {
   task: ProductionTask;
@@ -1203,6 +1238,7 @@ function TaskRow({
   onConsume?: () => void;
   onEditCostCenters?: () => void;
   onEditResponsibles?: () => void;
+  onEditSubtaskResponsibles?: (subtask: ProductionSubtask) => void;
   onRecordOvertime?: () => void;
 }) {
   const statusAccent: Record<ProductionTaskStatus, string> = {
@@ -1292,11 +1328,13 @@ function TaskRow({
             <SubtaskProgressBar subtasks={task.subtasks} />
             <div className="task-subtasks__list">
               {task.subtasks.map((subtask) => (
-                <SubtaskRow
+<SubtaskRow
                   key={subtask.id}
                   subtask={subtask}
                   pending={pending}
+                  canEdit={Boolean(canEditResponsibles && onEditSubtaskResponsibles && ["pendiente", "en_proceso", "pausada"].includes(subtask.status))}
                   onStatus={(status) => onSubtaskStatus(subtask, status)}
+                  onEditResponsibles={onEditSubtaskResponsibles ? () => onEditSubtaskResponsibles(subtask) : undefined}
                 />
               ))}
             </div>
@@ -1536,6 +1574,82 @@ function TaskResponsibleEditForm({
         <button type="button" className="btn-secondary h-12" disabled={pending} onClick={onCancel}>Cancelar</button>
         <button type="submit" className="btn-primary h-12" disabled={pending || !selectedNames.length || !hasChanges}>
           {pending ? "Guardando..." : "Guardar responsables"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function SubtaskResponsibleEditForm({
+  subtask,
+  task,
+  employees,
+  pending,
+  onCancel,
+  onSubmit,
+}: {
+  subtask: ProductionSubtask;
+  task: ProductionTask;
+  employees: ProductionEmployeeOption[];
+  pending: boolean;
+  onCancel: () => void;
+  onSubmit: (assignments: { employee_id: string; employee_name: string }[]) => void;
+}) {
+  const initialAssignments = subtask.assignments.map((a) => ({ employee_id: a.employee_id, employee_name: a.employee_name }));
+  const initialIds = initialAssignments.map((a) => a.employee_id);
+  const [selectedIds, setSelectedIds] = useState<string[]>(initialIds);
+  const hasChanges = [...selectedIds].sort().join("|") !== [...initialIds].sort().join("|");
+
+  function toggleEmployee(id: string) {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id],
+    );
+  }
+
+  return (
+    <form
+      className="modal-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (selectedIds.length && hasChanges) {
+          const result = selectedIds.map((id) => {
+            const emp = employees.find((e) => e.id === id);
+            return { employee_id: id, employee_name: emp?.name ?? "" };
+          });
+          onSubmit(result);
+        }
+      }}
+    >
+      <div className="modal-hint">
+        <strong>TP-{String(task.task_number || 0).padStart(4, "0")} · {subtask.title}</strong>
+        <span> Selecciona los operarios para esta subtarea.</span>
+      </div>
+      <div className="employee-multi-select">
+        <div className="employee-multi-select__heading">
+          <span className="label">Operarios de la subtarea</span>
+          <small>{selectedIds.length ? `${selectedIds.length} seleccionado${selectedIds.length === 1 ? "" : "s"}` : "Ninguno"}</small>
+        </div>
+        <div className="employee-check-grid">
+          {employees.map((employee) => {
+            const checked = selectedIds.includes(employee.id);
+            return (
+              <label key={employee.id} className={cn("employee-check", checked && "is-selected")}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggleEmployee(employee.id)}
+                />
+                <span>{employee.name}</span>
+              </label>
+            );
+          })}
+          {!employees.length ? <small>No hay empleados disponibles.</small> : null}
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <button type="button" className="btn-secondary h-12" disabled={pending} onClick={onCancel}>Cancelar</button>
+        <button type="submit" className="btn-primary h-12" disabled={pending || !hasChanges}>
+          {pending ? "Guardando..." : "Guardar operarios"}
         </button>
       </div>
     </form>
@@ -1837,11 +1951,15 @@ function isTodayInBogota(value: string | null): boolean {
 function SubtaskRow({
   subtask,
   pending,
+  canEdit = false,
   onStatus,
+  onEditResponsibles,
 }: {
   subtask: ProductionSubtask;
   pending: boolean;
+  canEdit?: boolean;
   onStatus: (status: ProductionTaskStatus) => void;
+  onEditResponsibles?: () => void;
 }) {
   const responsibleNames = subtask.assignments.map((assignment) => assignment.employee_name);
   const durationMs = subtask.work_sessions.length
@@ -1868,12 +1986,15 @@ function SubtaskRow({
           <strong>{subtask.title}</strong>
           <span className="subtask-row__duration">{durationPrefix}: {durationLabel}</span>
         </div>
-        <div className="subtask-row__people">
+<div className="subtask-row__people">
           <span>Operarios</span>
           <div>
             {responsibleNames.length
               ? responsibleNames.map((name) => <b key={name}>{name}</b>)
               : <b>Sin asignar</b>}
+            {canEdit && onEditResponsibles ? (
+              <button type="button" className="subtask-row__edit-btn" disabled={pending} onClick={onEditResponsibles} title="Cambiar operarios">✎</button>
+            ) : null}
           </div>
         </div>
         {subtask.cost_center_codes?.length ? (

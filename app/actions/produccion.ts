@@ -577,6 +577,64 @@ export async function updateProductionTaskResponsibles(taskId: string, responsib
   revalidatePath("/");
 }
 
+export async function updateProductionSubtaskAssignments(
+  subtaskId: string,
+  assignments: { employee_id: string; employee_name: string }[],
+): Promise<void> {
+  const supabase = await createClient();
+  const performedBy = await requireTaskCostCenterEditor(supabase);
+  const cleanSubtaskId = clean(subtaskId);
+  if (!cleanSubtaskId) throw new Error("No se encontro la subtarea.");
+
+  const items = assignments
+    .map((a) => ({ employee_id: clean(a.employee_id), employee_name: clean(a.employee_name) }))
+    .filter((a) => a.employee_id && a.employee_name);
+  if (!items.length) {
+    const { error: deleteAllError } = await supabase
+      .from("production_subtask_assignments")
+      .delete()
+      .eq("subtask_id", cleanSubtaskId);
+    if (deleteAllError) throwSupabaseError("quitar operarios de la subtarea", deleteAllError);
+    const { data: subtask } = await supabase
+      .from("production_subtasks")
+      .select("task_id,title")
+      .eq("id", cleanSubtaskId)
+      .single();
+    if (subtask) {
+      await insertTaskEvent(supabase, subtask.task_id, "subtarea_operarios_actualizados", `${subtask.title}: sin operarios`, performedBy);
+    }
+    revalidatePath("/");
+    return;
+  }
+
+  const { error: deleteError } = await supabase
+    .from("production_subtask_assignments")
+    .delete()
+    .eq("subtask_id", cleanSubtaskId);
+  if (deleteError) throwSupabaseError("reemplazar operarios de la subtarea", deleteError);
+
+  const { error: insertError } = await supabase
+    .from("production_subtask_assignments")
+    .insert(items.map((a) => ({ subtask_id: cleanSubtaskId, employee_id: a.employee_id, employee_name: a.employee_name })));
+  if (insertError) throwSupabaseError("asignar operarios a la subtarea", insertError);
+
+  const { data: subtask } = await supabase
+    .from("production_subtasks")
+    .select("task_id,title")
+    .eq("id", cleanSubtaskId)
+    .single();
+  if (subtask) {
+    await insertTaskEvent(
+      supabase,
+      subtask.task_id,
+      "subtarea_operarios_actualizados",
+      `${subtask.title}: ${items.map((a) => a.employee_name).join(", ")}`,
+      performedBy,
+    );
+  }
+  revalidatePath("/");
+}
+
 export async function updateProductionTaskStatus(id: string, status: ProductionTaskStatus, notes?: string | null, performedById?: string): Promise<void> {
   if (status === "cancelada") {
     throw new Error("Para eliminar una tarea debes usar la confirmacion con codigo.");
