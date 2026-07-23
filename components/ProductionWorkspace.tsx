@@ -274,6 +274,16 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
     });
   }
 
+  async function recordOvertimeWithConfirmation(taskId: string, operatorId: string): Promise<void> {
+    const result = await recordProductionOvertime(taskId, null, operatorId, false);
+    if (result.status !== "confirmation_required") return;
+
+    const confirmed = window.confirm(`${result.message}\n\n¿Deseas guardar este registro?`);
+    if (!confirmed) throw new Error("Registro de horas extra cancelado.");
+
+    await recordProductionOvertime(taskId, null, operatorId, true);
+  }
+
   function requestTaskAttribution(
     label: string,
     action: (operatorId: string) => void,
@@ -355,7 +365,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
               onDelete={setTaskPendingDeletion}
               onRecordOvertime={(task) => requestTaskAttribution(
                 "registrar las horas extra trabajadas hasta ahora",
-                (operatorId) => runAction("Registrando horas extra...", () => recordProductionOvertime(task.id, null, operatorId), "Horas extra registradas."),
+                (operatorId) => runAction("Registrando horas extra...", () => recordOvertimeWithConfirmation(task.id, operatorId), "Horas extra registradas."),
               )}
             />
           ) : null}
@@ -2126,7 +2136,10 @@ function TaskCreateForm({
             <small>{wizard.review.process_type || "Sin proceso"}</small>
           </div>
           <ReviewItem label="Centros de costo" value={selectedCostCenters.length ? selectedCostCenters.map(costCenterLabel).join(" · ") : (wizard.review.cost_center_code || "Sin centro de costo")} />
-          <ReviewItem label="Responsables" value={selectedEmployeeNames.join(", ") || "Sin responsables"} />
+          <ReviewItem
+            label="Responsables"
+            value={selectedEmployeeNames.join(", ") || "Se asignará automáticamente quien cree la tarea"}
+          />
           <ReviewItem label="Prioridad" value={selectedPriority || "Media"} />
           <ReviewItem label="Tiempo aproximado" value={wizard.review.estimated_time ? `${wizard.review.estimated_time} ${wizard.review.estimated_time_unit === "minutes" ? "min" : "h"}` : "Sin estimar"} />
           <ReviewItem label="Subtareas" value={subtasks.length ? `${subtasks.length} agregada${subtasks.length === 1 ? "" : "s"}` : "Sin subtareas"} />
@@ -2150,7 +2163,10 @@ function TaskCreateForm({
           ) : null}
           {wizard.review.notes ? <div className="task-wizard__review-notes"><span>Indicaciones</span><p>{wizard.review.notes}</p></div> : null}
         </div>
-        <div className="modal-hint"><strong>Paso final:</strong> al confirmar se subirán los adjuntos y la tarea quedará lista en el tablero.</div>
+        <div className="modal-hint">
+          <strong>Paso final:</strong> al confirmar se subirán los adjuntos y la tarea quedará lista en el tablero.
+          {!selectedEmployeeNames.length ? " Si usas la cuenta compartida, quien cree la tarea quedará como responsable." : ""}
+        </div>
       </section>
 
       {fileError ? <div className="form-error" role="alert">{fileError}</div> : null}

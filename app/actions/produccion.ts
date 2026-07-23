@@ -316,13 +316,15 @@ export async function createProductionTask(input: ProductionTaskInput): Promise<
   const { data: authData } = await supabase.auth.getUser();
   const user = authData.user;
   if (!user) throw new Error("Tu sesion vencio. Vuelve a ingresar.");
+  const assignedTo = cleanNullable(input.assigned_to)
+    ?? (isSharedProductionAccount(user.email) ? performedBy : null);
   const { data, error } = await supabase
     .from("production_tasks")
     .insert({
       title,
       process_type: clean(input.process_type) || "General",
       cost_center_code: selectedCostCenters[0] ?? null,
-      assigned_to: cleanNullable(input.assigned_to),
+      assigned_to: assignedTo,
       priority: input.priority ?? "media",
       planned_quantity: Math.max(1, positiveNumber(input.planned_quantity) || 1),
       estimated_minutes: Math.max(0, Math.round(positiveNumber(input.estimated_minutes))),
@@ -619,7 +621,12 @@ export async function updateProductionSubtaskStatus(id: string, status: Producti
   revalidatePath("/");
 }
 
-export async function recordProductionOvertime(taskId: string, subtaskId?: string | null, performedById?: string): Promise<void> {
+export async function recordProductionOvertime(
+  taskId: string,
+  subtaskId?: string | null,
+  performedById?: string,
+  confirmedLongDuration = false,
+): Promise<{ status: "recorded" } | { status: "confirmation_required"; message: string }> {
   const supabase = await createClient();
   const performedBy = await resolveTaskActor(supabase, performedById, true);
   const cleanTaskId = clean(taskId);
@@ -649,7 +656,7 @@ export async function recordProductionOvertime(taskId: string, subtaskId?: strin
   const now = new Date();
   const normalDeparture = initialOvertimeStart(now);
   if (now.getTime() <= normalDeparture.getTime()) {
-    throw new Error("Las horas extra solo se pueden registrar despues de las 5:00 p. m.");
+    throw new Error("Todavia estas dentro del horario laboral. Las horas extra se registran despues de las 5:00 p. m.");
   }
   const [dayStart, dayEnd] = bogotaDayRange(now);
   const { data: previousSession, error: previousError } = await supabase
@@ -673,6 +680,16 @@ export async function recordProductionOvertime(taskId: string, subtaskId?: strin
     : normalDeparture.getTime());
   if (startsAt.getTime() >= now.getTime()) {
     throw new Error("Esta persona ya registro sus horas extra hasta la hora actual.");
+  }
+  const overtimeMinutes = Math.max(1, Math.round((now.getTime() - startsAt.getTime()) / 60_000));
+  if (overtimeMinutes > 180 && !confirmedLongDuration) {
+    const hours = Math.floor(overtimeMinutes / 60);
+    const minutes = overtimeMinutes % 60;
+    const durationLabel = minutes ? `${hours} h ${minutes} min` : `${hours} h`;
+    return {
+      status: "confirmation_required",
+      message: `Vas a registrar ${durationLabel} de horas extra para ${performedBy}. Confirma que realmente trabajo todo ese tiempo.`,
+    };
   }
   const nowIso = now.toISOString();
   const { error } = await supabase.from("production_overtime_sessions").insert({
@@ -703,6 +720,7 @@ export async function recordProductionOvertime(taskId: string, subtaskId?: strin
     performedBy,
   );
   revalidatePath("/");
+  return { status: "recorded" };
 }
 
 export async function consumeProductionMaterial(input: ProductionMaterialConsumptionInput): Promise<string> {
