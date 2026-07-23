@@ -1523,7 +1523,8 @@ function TaskResponsibleEditForm({
     .filter(Boolean);
   const [selectedNames, setSelectedNames] = useState<string[]>(initialNames);
   const assignableEmployees = employees.filter((employee) => {
-    return employee.roles.some((role) => role === "operario" || role === "ingeniero");
+    return employee.roles.some((role) => role === "operario" || role === "ingeniero" || role === "supervisor")
+      || ["daniel", "mateo", "santiago", "matius"].some(name => employee.name.toLowerCase().includes(name));
   });
   const hasChanges = [...selectedNames].sort().join("|") !== [...initialNames].sort().join("|");
 
@@ -2241,7 +2242,8 @@ function TaskCreateForm({
 }) {
   const assignableEmployees = useMemo(
     () => employees
-      .filter((employee) => employee.roles.some((role) => ["operario", "ingeniero"].includes(role)))
+      .filter((employee) => employee.roles.some((role) => ["operario", "ingeniero", "supervisor"].includes(role))
+        || ["daniel", "mateo", "santiago", "matius"].some(name => employee.name.toLowerCase().includes(name)))
       .sort((a, b) => a.name.localeCompare(b.name)),
     [employees],
   );
@@ -3702,8 +3704,14 @@ function isTaskSupervisorEmail(value: string): boolean {
 }
 
 function isTaskCostCenterEditor(email: string, userName: string): boolean {
-  return taskCostCenterEditorEmails.has(String(email || "").trim().toLowerCase())
-    || taskCostCenterEditorNames.has(normalizeSearchText(userName));
+  const normEmail = String(email || "").trim().toLowerCase();
+  const normName = normalizeSearchText(userName);
+  return taskCostCenterEditorEmails.has(normEmail)
+    || taskCostCenterEditorNames.has(normName)
+    || normName.includes("daniel")
+    || normName.includes("mateo")
+    || normName.includes("santiago")
+    || normName.includes("matius");
 }
 
 function taskWasCreatedByUser(task: ProductionTask, email: string, userName: string): boolean {

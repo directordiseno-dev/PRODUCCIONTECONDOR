@@ -167,6 +167,65 @@ export async function listProductionWorkspaceData(): Promise<ProductionWorkspace
   const subtaskCostCenters = normalizeCostCenterAssignments(advancedPlanningReady ? subtaskCostCentersRes.data ?? [] : []);
   const subtasks = normalizeProductionSubtasks(taskExtensionsReady ? subtasksRes.data ?? [] : [], assignments, attachments, workSessions, subtaskCostCenters);
 
+  // Reparar de forma automática cualquier subtarea en proceso que haya quedado sin operario asignado
+  const unassignedSubtasks = subtasks.filter(s => s.status === "en_proceso" && (!s.assignments || s.assignments.length === 0));
+  if (unassignedSubtasks.length > 0) {
+    const { data: employees } = await supabase
+      .from("payroll_employees")
+      .select("id,name")
+      .eq("deleted", false);
+
+    if (employees && employees.length > 0) {
+      for (const subtask of unassignedSubtasks) {
+        const session = workSessions.find(ws => ws.subtask_id === subtask.id);
+        const startedBy = clean(session?.started_by);
+        if (startedBy) {
+          const normPerformer = normalizeSearchText(startedBy);
+          let employee = employees.find(e => normalizeSearchText(e.name) === normPerformer || normalizeSearchText(e.id) === normPerformer);
+          if (!employee && normPerformer) {
+            employee = employees.find(e => {
+              const norm = normalizeSearchText(e.name);
+              return norm.includes(normPerformer) || normPerformer.includes(norm);
+            });
+          }
+          if (employee) {
+            await supabase.from("production_subtask_assignments").insert({
+              subtask_id: subtask.id,
+              employee_id: employee.id,
+              employee_name: employee.name
+            });
+            subtask.assignments.push({
+              id: "",
+              subtask_id: subtask.id,
+              employee_id: employee.id,
+              employee_name: employee.name,
+              created_at: new Date().toISOString()
+            });
+
+            const { data: task } = await supabase
+              .from("production_tasks")
+              .select("assigned_to")
+              .eq("id", subtask.task_id)
+              .single();
+            if (task) {
+              const currentNames = (task.assigned_to || "")
+                .split(",")
+                .map((n: string) => n.trim())
+                .filter(Boolean);
+              if (!currentNames.some((n: string) => n.toLowerCase() === employee.name.toLowerCase())) {
+                currentNames.push(employee.name);
+                await supabase
+                  .from("production_tasks")
+                  .update({ assigned_to: currentNames.join(", "), updated_at: new Date().toISOString() })
+                  .eq("id", subtask.task_id);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   return {
     schemaReady: true,
     taskExtensionsReady,
@@ -739,6 +798,58 @@ export async function updateProductionSubtaskStatus(id: string, status: Producti
 
   const taskId = String(subtask.task_id);
   const now = new Date().toISOString();
+
+  if (status === "en_proceso") {
+    const { data: currentAssignments, error: assignmentsErr } = await supabase
+      .from("production_subtask_assignments")
+      .select("id")
+      .eq("subtask_id", cleanId);
+    
+    if (!assignmentsErr && (!currentAssignments || currentAssignments.length === 0)) {
+      const employee = await resolveEmployeePerformer(supabase, performedById);
+      if (employee) {
+        const { error: assignErr } = await supabase
+          .from("production_subtask_assignments")
+          .insert({
+            subtask_id: cleanId,
+            employee_id: employee.id,
+            employee_name: employee.name,
+          });
+        
+        if (!assignErr) {
+          const { data: task, error: taskErr } = await supabase
+            .from("production_tasks")
+            .select("assigned_to")
+            .eq("id", taskId)
+            .single();
+          
+          if (!taskErr && task) {
+            const currentNames = (task.assigned_to || "")
+              .split(",")
+              .map((n: string) => n.trim())
+              .filter(Boolean);
+            
+            if (!currentNames.some((n: string) => n.toLowerCase() === employee.name.toLowerCase())) {
+              currentNames.push(employee.name);
+              await supabase
+                .from("production_tasks")
+                .update({ assigned_to: currentNames.join(", "), updated_at: now })
+                .eq("id", taskId);
+              
+              await insertTaskEvent(
+                supabase,
+                taskId,
+                "responsables_actualizados",
+                currentNames.join(", "),
+                performedBy,
+              );
+            }
+          }
+        }
+      }
+    }
+  }
+
   const { error: updateSubtaskError } = await supabase
     .from("production_subtasks")
     .update({ status, updated_at: now })
@@ -1238,7 +1349,14 @@ async function requireTaskCostCenterEditor(
 
   const email = clean(user.email).toLowerCase();
   const name = clean(String(user.user_metadata?.full_name || user.user_metadata?.name || "")).toLowerCase();
-  if (!taskCostCenterEditorEmails.has(email) && !taskCostCenterEditorNames.has(name)) {
+  if (
+    !taskCostCenterEditorEmails.has(email) &&
+    !taskCostCenterEditorNames.has(name) &&
+    !name.includes("daniel") &&
+    !name.includes("mateo") &&
+    !name.includes("santiago") &&
+    !name.includes("matius")
+  ) {
     throw new Error("Solo Matius, Daniel o Santiago pueden cambiar los centros de costo de una tarea.");
   }
   return authenticatedActorLabel(user);
@@ -1268,14 +1386,88 @@ async function resolvePerformerName(
     .single();
   if (error || !data) throw new Error("La persona seleccionada ya no esta disponible. Elige nuevamente quien usa la aplicacion.");
 
-  const roles = normalizeProductionRoles(data.production_roles);
-  if (!roles.some((role) => assignableProductionRoles.has(role))) {
-    throw new Error("Solo operarios e ingenieros pueden registrar acciones de produccion.");
-  }
-
   const name = clean(data.name);
   if (!name) throw new Error("La persona seleccionada no tiene un nombre valido.");
+
+  const roles = normalizeProductionRoles(data.production_roles);
+  const isSpecialName = name.toLowerCase().includes("daniel")
+    || name.toLowerCase().includes("mateo")
+    || name.toLowerCase().includes("santiago")
+    || name.toLowerCase().includes("matius");
+  if (!roles.some((role) => assignableProductionRoles.has(role)) && !isSpecialName) {
+    throw new Error("Solo operarios, ingenieros o supervisores pueden registrar acciones de produccion.");
+  }
+
   return name;
+}
+
+function normalizeSearchText(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es").trim();
+}
+
+async function resolveEmployeePerformer(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  performedById?: string | null,
+): Promise<{ id: string; name: string } | null> {
+  if (performedById) {
+    const { data } = await supabase
+      .from("payroll_employees")
+      .select("id,name")
+      .eq("id", clean(performedById))
+      .eq("deleted", false)
+      .maybeSingle();
+    if (data) {
+      return { id: String(data.id), name: String(data.name).trim() };
+    }
+  }
+
+  const { data: authData } = await supabase.auth.getUser();
+  const user = authData.user;
+  if (!user) return null;
+
+  const authName = clean(String(user.user_metadata?.full_name || user.user_metadata?.name || ""));
+  const authEmail = clean(user.email);
+
+  if (isSharedProductionAccount(authEmail) && !performedById) {
+    return null;
+  }
+
+  const { data: employees } = await supabase
+    .from("payroll_employees")
+    .select("id,name")
+    .eq("deleted", false);
+
+  if (!employees) return null;
+
+  const normalizedAuthName = normalizeSearchText(authName);
+  const normalizedAuthEmailName = normalizeSearchText(authEmail.split("@")[0]);
+
+  let matched = employees.find(e => normalizeSearchText(e.name) === normalizedAuthName);
+  
+  if (!matched && normalizedAuthName) {
+    matched = employees.find(e => {
+      const norm = normalizeSearchText(e.name);
+      return norm.includes(normalizedAuthName) || normalizedAuthName.includes(norm);
+    });
+  }
+
+  if (!matched && normalizedAuthEmailName) {
+    matched = employees.find(e => {
+      const norm = normalizeSearchText(e.name).replace(/\s+/g, "");
+      const emailPrefixClean = normalizedAuthEmailName.replace(/[^a-z0-9]/g, "");
+      return norm.includes(emailPrefixClean) || emailPrefixClean.includes(norm);
+    });
+  }
+
+  if (matched) {
+    return { id: String(matched.id), name: String(matched.name).trim() };
+  }
+
+  if (authName) {
+    return { id: authEmail || authName, name: authName };
+  }
+
+  return null;
 }
 
 function normalizeInventoryItems(rows: unknown[]): InventoryItem[] {
@@ -1399,7 +1591,7 @@ function normalizeTaskMaterials(rows: unknown[]): ProductionTaskMaterial[] {
 }
 
 const validProductionRoles: ProductionEmployeeRole[] = ["operario", "ingeniero", "supervisor", "logistica", "administrativo"];
-const assignableProductionRoles = new Set<ProductionEmployeeRole>(["operario", "ingeniero"]);
+const assignableProductionRoles = new Set<ProductionEmployeeRole>(["operario", "ingeniero", "supervisor"]);
 
 function normalizeProductionEmployees(rows: unknown[]): ProductionEmployeeOption[] {
   return rows
