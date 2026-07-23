@@ -30,6 +30,8 @@ type SupabaseError = { message?: string; code?: string; hint?: string | null; de
 const productionAttachmentsBucket = "production-task-attachments";
 const productionTaskDeleteCode = "TECONDOR2026";
 const bogotaUtcOffsetMs = 5 * 60 * 60 * 1000;
+const taskCostCenterEditorEmails = new Set(["matius-098@hotmail.com"]);
+const taskCostCenterEditorNames = new Set(["mateo agudelo", "matius", "daniel agudelo", "santiago zapata"]);
 
 export async function listProductionWorkspaceData(): Promise<ProductionWorkspaceData> {
   const supabase = await createClient();
@@ -451,6 +453,91 @@ export async function createProductionTask(input: ProductionTaskInput): Promise<
     await supabase.from("production_tasks").delete().eq("id", taskId);
     throw creationError;
   }
+}
+
+export async function updateProductionTaskCostCenters(taskId: string, costCenterCodes: string[]): Promise<void> {
+  const supabase = await createClient();
+  const performedBy = await requireTaskCostCenterEditor(supabase);
+  const cleanTaskId = clean(taskId);
+  const selectedCostCenters = uniqueCleanStrings(costCenterCodes).slice(0, 20);
+  if (!cleanTaskId) throw new Error("No se encontro la tarea.");
+  if (!selectedCostCenters.length) throw new Error("Selecciona al menos un centro de costo.");
+
+  const [{ data: task, error: taskError }, { data: validCenters, error: centersError }] = await Promise.all([
+    supabase
+      .from("production_tasks")
+      .select("id,task_number,title,cost_center_code")
+      .eq("id", cleanTaskId)
+      .single(),
+    supabase
+      .from("cost_centers")
+      .select("code")
+      .in("code", selectedCostCenters),
+  ]);
+  if (taskError || !task) throwSupabaseError("consultar la tarea de produccion", taskError ?? {});
+  if (centersError) throwSupabaseError("validar los centros de costo", centersError);
+
+  const validCodes = new Set((validCenters ?? []).map((center) => clean(String(center.code))));
+  const missingCodes = selectedCostCenters.filter((code) => !validCodes.has(code));
+  if (missingCodes.length) throw new Error(`Estos centros de costo ya no estan disponibles: ${missingCodes.join(", ")}.`);
+
+  const { data: previousCenters, error: previousCentersError } = await supabase
+    .from("production_task_cost_centers")
+    .select("cost_center_code,position")
+    .eq("task_id", cleanTaskId)
+    .order("position");
+  if (previousCentersError) {
+    if (isMissingProductionSchema(previousCentersError)) throw new Error("Ejecuta la migracion de centros de costo multiples en Supabase.");
+    throwSupabaseError("consultar los centros de costo actuales", previousCentersError);
+  }
+
+  const restorePreviousCenters = async () => {
+    await supabase.from("production_task_cost_centers").delete().eq("task_id", cleanTaskId);
+    if (previousCenters?.length) {
+      await supabase.from("production_task_cost_centers").insert(previousCenters.map((center) => ({
+        task_id: cleanTaskId,
+        cost_center_code: clean(String(center.cost_center_code)),
+        position: Number(center.position || 0),
+      })));
+    }
+  };
+
+  const { error: deleteError } = await supabase
+    .from("production_task_cost_centers")
+    .delete()
+    .eq("task_id", cleanTaskId);
+  if (deleteError) throwSupabaseError("reemplazar los centros de costo", deleteError);
+
+  const { error: insertError } = await supabase
+    .from("production_task_cost_centers")
+    .insert(selectedCostCenters.map((cost_center_code, position) => ({
+      task_id: cleanTaskId,
+      cost_center_code,
+      position,
+    })));
+  if (insertError) {
+    await restorePreviousCenters();
+    throwSupabaseError("guardar los centros de costo", insertError);
+  }
+
+  const now = new Date().toISOString();
+  const { error: updateTaskError } = await supabase
+    .from("production_tasks")
+    .update({ cost_center_code: selectedCostCenters[0], updated_at: now })
+    .eq("id", cleanTaskId);
+  if (updateTaskError) {
+    await restorePreviousCenters();
+    throwSupabaseError("actualizar el centro de costo principal", updateTaskError);
+  }
+
+  await insertTaskEvent(
+    supabase,
+    cleanTaskId,
+    "centros_costo_actualizados",
+    `CC ${selectedCostCenters.join(", ")}`,
+    performedBy,
+  );
+  revalidatePath("/");
 }
 
 export async function updateProductionTaskStatus(id: string, status: ProductionTaskStatus, notes?: string | null, performedById?: string): Promise<void> {
@@ -1044,6 +1131,21 @@ async function currentAuthenticatedActor(
   const { data } = await supabase.auth.getUser();
   const user = data.user;
   if (!user) throw new Error("Tu sesion vencio. Vuelve a ingresar.");
+  return authenticatedActorLabel(user);
+}
+
+async function requireTaskCostCenterEditor(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+): Promise<string> {
+  const { data } = await supabase.auth.getUser();
+  const user = data.user;
+  if (!user) throw new Error("Tu sesion vencio. Vuelve a ingresar.");
+
+  const email = clean(user.email).toLowerCase();
+  const name = clean(String(user.user_metadata?.full_name || user.user_metadata?.name || "")).toLowerCase();
+  if (!taskCostCenterEditorEmails.has(email) && !taskCostCenterEditorNames.has(name)) {
+    throw new Error("Solo Matius, Daniel o Santiago pueden cambiar los centros de costo de una tarea.");
+  }
   return authenticatedActorLabel(user);
 }
 

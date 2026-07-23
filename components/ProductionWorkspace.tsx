@@ -12,6 +12,7 @@ import {
   deleteProductionTask,
   recordProductionOvertime,
   updateInventoryItem,
+  updateProductionTaskCostCenters,
   updateProductionSubtaskStatus,
   updateProductionTaskStatus,
 } from "@/app/actions/produccion";
@@ -97,6 +98,8 @@ const statusActionLabels: Partial<Record<ProductionTaskStatus, string>> = {
 
 const activeOperatorStorageKey = "tecondor-production-active-operator";
 const taskSupervisorEmails = new Set(["matius-098@hotmail.com"]);
+const taskCostCenterEditorEmails = new Set(["matius-098@hotmail.com"]);
+const taskCostCenterEditorNames = new Set(["mateo agudelo", "matius", "daniel agudelo", "santiago zapata"]);
 const sharedTaskCreatorExcludedNames = new Set(["daniel agudelo", "santiago zapata"]);
 const bogotaUtcOffsetMs = 5 * 60 * 60 * 1000;
 const regularWorkWindows: Array<[number, number]> = [
@@ -116,6 +119,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
   const [modal, setModal] = useState<WorkspaceModal>(null);
   const [consumptionTaskId, setConsumptionTaskId] = useState("");
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
+  const [taskCostCenterPendingEdit, setTaskCostCenterPendingEdit] = useState<ProductionTask | null>(null);
   const [taskPendingDeletion, setTaskPendingDeletion] = useState<ProductionTask | null>(null);
   const [pauseTarget, setPauseTarget] = useState<PauseTarget | null>(null);
   const [highlightedTaskId, setHighlightedTaskId] = useState("");
@@ -132,6 +136,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
   const usesSharedProductionAccount = isSharedProductionEmail(email);
   const activeOperatorName = usesSharedProductionAccount ? activeOperator?.name || userName : userName;
   const receivesNewTaskNotifications = usesSharedProductionAccount || isTaskSupervisorEmail(email);
+  const canEditTaskCostCenters = isTaskCostCenterEditor(email, userName) && data.advancedPlanningReady;
   const operatorPickerEmployees = operatorPickerMode === "task_creation"
     ? data.employees.filter((employee) => !isExcludedSharedTaskCreator(employee))
     : data.employees;
@@ -341,7 +346,9 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
               highlightedTaskId={highlightedTaskId}
               timeTrackingReady={data.timeTrackingReady}
               advancedPlanningReady={data.advancedPlanningReady}
+              canEditCostCenters={canEditTaskCostCenters}
               onConsumeTask={openConsumption}
+              onEditCostCenters={setTaskCostCenterPendingEdit}
               onStatus={(task, status) => {
                 if (status === "pausada") {
                   setPauseTarget({ kind: "task", task });
@@ -448,6 +455,30 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
           onCancel={() => setModal(null)}
           onSubmit={(form) => runAction("Registrando movimiento de inventario...", () => createInventoryMovement(form), "Movimiento registrado.", () => { setModal(null); setActiveTab("inventario"); })}
         />
+      </WorkspaceModalPanel>
+
+      <WorkspaceModalPanel
+        open={Boolean(taskCostCenterPendingEdit)}
+        title="Cambiar centros de costo"
+        detail="El estado, los tiempos y el avance de la tarea no se modifican."
+        onClose={() => setTaskCostCenterPendingEdit(null)}
+        wide
+      >
+        {taskCostCenterPendingEdit ? (
+          <TaskCostCenterEditForm
+            key={taskCostCenterPendingEdit.id}
+            task={taskCostCenterPendingEdit}
+            costCenters={data.cost_centers}
+            pending={isPending}
+            onCancel={() => setTaskCostCenterPendingEdit(null)}
+            onSubmit={(codes) => runAction(
+              "Actualizando centros de costo...",
+              () => updateProductionTaskCostCenters(taskCostCenterPendingEdit.id, codes),
+              "Centros de costo actualizados.",
+              () => setTaskCostCenterPendingEdit(null),
+            )}
+          />
+        ) : null}
       </WorkspaceModalPanel>
 
       <WorkspaceModalPanel
@@ -775,7 +806,9 @@ function TasksTab({
   highlightedTaskId,
   timeTrackingReady,
   advancedPlanningReady,
+  canEditCostCenters,
   onConsumeTask,
+  onEditCostCenters,
   onStatus,
   onSubtaskStatus,
   onDelete,
@@ -786,7 +819,9 @@ function TasksTab({
   highlightedTaskId: string;
   timeTrackingReady: boolean;
   advancedPlanningReady: boolean;
+  canEditCostCenters: boolean;
   onConsumeTask: (taskId?: string) => void;
+  onEditCostCenters: (task: ProductionTask) => void;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
   onSubtaskStatus: (subtask: ProductionSubtask, status: ProductionTaskStatus) => void;
   onDelete: (task: ProductionTask) => void;
@@ -924,6 +959,7 @@ function TasksTab({
           readOnly={selectedTaskIsFinal}
           timeTrackingReady={timeTrackingReady}
           overtimeReady={advancedPlanningReady}
+          canEditCostCenters={canEditCostCenters}
           onStatus={onStatus}
           onSubtaskStatus={onSubtaskStatus}
           onDelete={(task) => {
@@ -933,6 +969,10 @@ function TasksTab({
           onConsume={() => {
             setSelectedTaskId("");
             onConsumeTask(selectedTask.id);
+          }}
+          onEditCostCenters={() => {
+            setSelectedTaskId("");
+            onEditCostCenters(selectedTask);
           }}
           onRecordOvertime={() => onRecordOvertime(selectedTask)}
         />
@@ -1097,10 +1137,12 @@ function TaskRow({
   readOnly = false,
   timeTrackingReady = false,
   overtimeReady = false,
+  canEditCostCenters = false,
   onStatus,
   onSubtaskStatus = () => undefined,
   onDelete,
   onConsume,
+  onEditCostCenters,
   onRecordOvertime,
 }: {
   task: ProductionTask;
@@ -1110,10 +1152,12 @@ function TaskRow({
   readOnly?: boolean;
   timeTrackingReady?: boolean;
   overtimeReady?: boolean;
+  canEditCostCenters?: boolean;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
   onSubtaskStatus?: (subtask: ProductionSubtask, status: ProductionTaskStatus) => void;
   onDelete?: (task: ProductionTask) => void;
   onConsume?: () => void;
+  onEditCostCenters?: () => void;
   onRecordOvertime?: () => void;
 }) {
   const statusAccent: Record<ProductionTaskStatus, string> = {
@@ -1233,9 +1277,19 @@ function TaskRow({
         <div className="task-summary-readonly">
           <strong>Resumen final</strong>
           <span>Solo lectura</span>
+          {canEditCostCenters && onEditCostCenters ? (
+            <button type="button" className="btn-secondary h-11 px-3 text-sm" disabled={pending} onClick={onEditCostCenters}>
+              Cambiar CC
+            </button>
+          ) : null}
         </div>
       ) : (
       <div className="task-row__actions grid grid-cols-2 gap-2 md:min-w-[210px] md:flex md:flex-wrap md:justify-end">
+        {canEditCostCenters && onEditCostCenters ? (
+          <button type="button" className="btn-secondary h-11 px-3 text-sm" disabled={pending} onClick={onEditCostCenters}>
+            Cambiar CC
+          </button>
+        ) : null}
         {onConsume && !["revisada", "cancelada"].includes(task.status) ? (
           <button type="button" className="btn-quiet h-11 px-3 text-sm" disabled={pending} onClick={onConsume}>
             + Consumo
@@ -1310,6 +1364,55 @@ function SubtaskProgressBar({ subtasks, compact = false }: { subtasks: Productio
         </span>
       ) : null}
     </span>
+  );
+}
+
+function TaskCostCenterEditForm({
+  task,
+  costCenters,
+  pending,
+  onCancel,
+  onSubmit,
+}: {
+  task: ProductionTask;
+  costCenters: CostCenterOption[];
+  pending: boolean;
+  onCancel: () => void;
+  onSubmit: (codes: string[]) => void;
+}) {
+  const initialCodes = Array.from(new Set([
+    ...(task.cost_center_codes ?? []),
+    task.cost_center_code,
+  ].map((code) => String(code || "").trim()).filter(Boolean)));
+  const [codes, setCodes] = useState<string[]>(initialCodes);
+  const hasChanges = [...codes].sort().join("|") !== [...initialCodes].sort().join("|");
+
+  return (
+    <form
+      className="modal-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (codes.length && hasChanges) onSubmit(codes);
+      }}
+    >
+      <div className="modal-hint">
+        <strong>TP-{String(task.task_number || 0).padStart(4, "0")} · {task.title}</strong>
+        <span> Puedes reemplazar o agregar centros de costo incluso si la tarea ya está en proceso o terminada.</span>
+      </div>
+      <CostCenterMultiSelect
+        label="Centros de costo de la tarea"
+        costCenters={costCenters}
+        value={codes}
+        onChange={setCodes}
+      />
+      {!codes.length ? <div className="form-error" role="alert">La tarea debe conservar al menos un centro de costo.</div> : null}
+      <div className="grid grid-cols-2 gap-3">
+        <button type="button" className="btn-secondary h-12" disabled={pending} onClick={onCancel}>Cancelar</button>
+        <button type="submit" className="btn-primary h-12" disabled={pending || !codes.length || !hasChanges}>
+          {pending ? "Guardando..." : "Guardar centros"}
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -3349,6 +3452,11 @@ function isSharedProductionEmail(value: string): boolean {
 
 function isTaskSupervisorEmail(value: string): boolean {
   return taskSupervisorEmails.has(String(value || "").trim().toLowerCase());
+}
+
+function isTaskCostCenterEditor(email: string, userName: string): boolean {
+  return taskCostCenterEditorEmails.has(String(email || "").trim().toLowerCase())
+    || taskCostCenterEditorNames.has(normalizeSearchText(userName));
 }
 
 function taskWasCreatedByUser(task: ProductionTask, email: string, userName: string): boolean {
