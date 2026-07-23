@@ -1350,10 +1350,10 @@ function normalizeProductionEmployees(rows: unknown[]): ProductionEmployeeOption
       return {
         id: String(value.id ?? ""),
         name: String(value.name ?? "").trim(),
-        roles: normalizeProductionRoles(value.production_roles).filter((role) => assignableProductionRoles.has(role)),
+        roles: normalizeProductionRoles(value.production_roles),
       };
     })
-    .filter((employee) => employee.id && employee.name && employee.roles.length);
+    .filter((employee) => employee.id && employee.name);
 }
 
 function normalizeProductionRoles(value: unknown): ProductionEmployeeRole[] {
