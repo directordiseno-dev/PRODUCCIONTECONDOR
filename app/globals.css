@@ -1078,3 +1078,57 @@ button { touch-action: manipulation; }
   .workspace-modal--typing .task-wizard__actions .btn-primary,
   .workspace-modal--typing .task-wizard__actions .btn-secondary { min-height: 38px; padding: 5px 9px; font-size: 11px; }
 }
+
+/* Estilos de optimización visual para operarios en Planta */
+.task-detail-notes-box {
+  margin-top: 15px;
+  margin-bottom: 15px;
+  border: 1px solid rgba(190, 30, 114, 0.16);
+  border-radius: 14px;
+  background: #FFF5F9;
+  padding: 14px 18px;
+  box-shadow: 0 4px 12px rgba(190, 30, 114, 0.04);
+}
+.task-detail-notes-box span {
+  display: block;
+  color: #8E1557;
+  font-size: 11px;
+  font-weight: 950;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.task-detail-notes-box p {
+  margin: 6px 0 0;
+  color: #18181b;
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.6;
+}
+
+/* Destacar responsables de la tarea principal */
+.task-detail-responsibles b {
+  font-size: 11px !important;
+  font-weight: 900 !important;
+  padding: 6px 12px !important;
+  color: #8E1557 !important;
+  background: #FFF0F6 !important;
+  border: 1px solid #f9c2dc !important;
+  box-shadow: 0 2px 5px rgba(190, 30, 114, 0.08);
+}
+
+/* Botones de acción de subtareas más grandes y fáciles de pulsar en planta */
+.subtask-row__actions button {
+  min-width: 110px !important;
+  min-height: 52px !important;
+  padding: 10px 22px !important;
+  font-size: 14px !important;
+  font-weight: 950 !important;
+  border-radius: 12px !important;
+  letter-spacing: 0.02em;
+  transition: all 0.2s ease !important;
+}
+
+.subtask-row__actions button:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}

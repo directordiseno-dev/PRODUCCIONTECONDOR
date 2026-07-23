@@ -353,6 +353,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
               advancedPlanningReady={data.advancedPlanningReady}
               canEditCostCenters={canEditTaskCostCenters}
               canEditResponsibles={canEditTaskResponsibles}
+              isSharedAccount={usesSharedProductionAccount}
               employees={data.employees}
               onConsumeTask={openConsumption}
               onEditCostCenters={setTaskCostCenterPendingEdit}
@@ -866,6 +867,7 @@ function TasksTab({
   advancedPlanningReady,
   canEditCostCenters,
   canEditResponsibles,
+  isSharedAccount = false,
   employees,
   onConsumeTask,
   onEditCostCenters,
@@ -883,6 +885,7 @@ function TasksTab({
   advancedPlanningReady: boolean;
   canEditCostCenters: boolean;
   canEditResponsibles: boolean;
+  isSharedAccount?: boolean;
   employees: ProductionEmployeeOption[];
   onConsumeTask: (taskId?: string) => void;
   onEditCostCenters: (task: ProductionTask) => void;
@@ -1027,6 +1030,7 @@ function TasksTab({
           overtimeReady={advancedPlanningReady}
           canEditCostCenters={canEditCostCenters}
           canEditResponsibles={canEditResponsibles}
+          isSharedAccount={isSharedAccount}
           onStatus={onStatus}
           onSubtaskStatus={onSubtaskStatus}
           onDelete={(task) => {
@@ -1214,6 +1218,7 @@ function TaskRow({
   overtimeReady = false,
   canEditCostCenters = false,
   canEditResponsibles = false,
+  isSharedAccount = false,
   onStatus,
   onSubtaskStatus = () => undefined,
   onDelete,
@@ -1232,6 +1237,7 @@ function TaskRow({
   overtimeReady?: boolean;
   canEditCostCenters?: boolean;
   canEditResponsibles?: boolean;
+  isSharedAccount?: boolean;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
   onSubtaskStatus?: (subtask: ProductionSubtask, status: ProductionTaskStatus) => void;
   onDelete?: (task: ProductionTask) => void;
@@ -1276,7 +1282,7 @@ function TaskRow({
           {!detailMode ? <span className="rounded-full bg-neutral-950 px-2.5 py-1 font-mono text-xs font-black text-white">TP-{String(task.task_number || 0).padStart(4, "0")}</span> : null}
           {isNewTask ? <NewTaskBadge /> : isPartialTask ? <PartialTaskBadge /> : <StatusBadge status={task.status} />}
           <PriorityBadge priority={task.priority} />
-          {task.cost_center_code ? <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-bold text-neutral-600">{task.cost_center_code}</span> : null}
+          {task.cost_center_code && !isSharedAccount ? <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs font-bold text-neutral-600">{task.cost_center_code}</span> : null}
         </div>
         {!detailMode ? <div className="task-row__title mt-2 text-lg font-black leading-tight text-neutral-950">{task.title}</div> : null}
         {detailMode ? (
@@ -1289,17 +1295,19 @@ function TaskRow({
                   : <b>Sin responsable</b>}
               </div>
             </div>
-            {task.cost_center_codes?.length ? (
+            {task.cost_center_codes?.length && !isSharedAccount ? (
               <div className="task-detail-cost-centers">
                 <span>Centros de costo</span>
                 <div>{task.cost_center_codes.map((code) => <b key={code}>{code}</b>)}</div>
               </div>
             ) : null}
-            <div className="task-detail-meta">
-              <span><small>Proceso</small><b>{task.process_type}</b></span>
-              <span><small>Tiempo aprox.</small><b>{formatEstimatedHours(task.estimated_minutes)}</b></span>
-              <span><small>Creada por</small><b>{createdByLabel(task.created_by)}</b></span>
-            </div>
+            {!isSharedAccount ? (
+              <div className="task-detail-meta">
+                <span><small>Proceso</small><b>{task.process_type}</b></span>
+                <span><small>Tiempo aprox.</small><b>{formatEstimatedHours(task.estimated_minutes)}</b></span>
+                <span><small>Creada por</small><b>{createdByLabel(task.created_by)}</b></span>
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="task-row__facts mt-2 grid grid-cols-2 gap-2 text-xs text-neutral-600 lg:grid-cols-4">
@@ -1309,7 +1317,16 @@ function TaskRow({
             <TaskFact label="Tiempo aprox." value={formatEstimatedHours(task.estimated_minutes)} />
           </div>
         )}
-        {task.notes ? <p className="mt-2 line-clamp-2 text-xs text-neutral-500">{task.notes}</p> : null}
+        {task.notes ? (
+          detailMode ? (
+            <div className="task-detail-notes-box">
+              <span>Indicaciones de la tarea:</span>
+              <p>{task.notes}</p>
+            </div>
+          ) : (
+            <p className="mt-2 line-clamp-2 text-xs text-neutral-500">{task.notes}</p>
+          )
+        ) : null}
         {currentPause ? (
           <div className="task-current-pause">
             <strong>Pausada: {currentPause.end_reason?.replace(/^Pausa:\s*/, "")}</strong>
@@ -3676,8 +3693,13 @@ function costCenterLabel(costCenter: CostCenterOption): string {
 }
 
 function createdByLabel(value: string | null): string {
-  const raw = String(value || "").trim();
+  const raw = String(value || "").trim().toLowerCase();
   if (!raw) return "Sin registro";
+  
+  if (raw.includes("auxiliar")) return "Santiago";
+  if (raw.includes("director") || raw.includes("diseno")) return "Daniel";
+  if (raw.includes("mateo")) return "Mateo";
+
   const localPart = raw.includes("@") ? raw.split("@")[0] : raw;
   return localPart
     .split(/[\s._-]+/)
