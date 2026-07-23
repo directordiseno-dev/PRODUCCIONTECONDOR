@@ -2039,12 +2039,14 @@ function SubtaskRow({
       </div>
       <div className="subtask-row__actions">
         {["pendiente", "pausada"].includes(subtask.status) ? (
-          <button type="button" className="btn-primary" disabled={pending} onClick={() => onStatus("en_proceso")}>Iniciar</button>
+          <button type="button" className="btn-primary btn-subtask-start" disabled={pending} onClick={() => onStatus("en_proceso")}>
+            {subtask.status === "pausada" ? "Reanudar" : "Iniciar"}
+          </button>
         ) : null}
         {subtask.status === "en_proceso" ? (
           <>
-            <button type="button" className="btn-secondary" disabled={pending} onClick={() => onStatus("pausada")}>Pausar</button>
-            <button type="button" className="btn-primary" disabled={pending} onClick={() => onStatus("terminada")}>Terminar</button>
+            <button type="button" className="btn-secondary btn-subtask-pause" disabled={pending} onClick={() => onStatus("pausada")}>Pausar</button>
+            <button type="button" className="btn-primary btn-subtask-stop" disabled={pending} onClick={() => onStatus("terminada")}>Terminar</button>
           </>
         ) : null}
       </div>
