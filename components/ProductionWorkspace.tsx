@@ -997,7 +997,7 @@ function TasksTab({
               <header><strong>{group.label}</strong><span>{group.tasks.length} tarea{group.tasks.length === 1 ? "" : "s"}</span></header>
               <div>
                 {group.tasks.map((task) => (
-                  <CompactTaskRow key={task.id} task={task} onOpen={() => setSelectedTaskId(task.id)} />
+                  <CompactTaskRow key={task.id} task={task} onOpen={() => setSelectedTaskId(task.id)} isSharedAccount={isSharedAccount} />
                 ))}
               </div>
             </section>
@@ -1007,6 +1007,7 @@ function TasksTab({
               task={task}
               highlighted={task.id === highlightedTaskId}
               onOpen={() => setSelectedTaskId(task.id)}
+              isSharedAccount={isSharedAccount}
             />
           ))}
           {!filteredTasks.length ? <EmptyState title="No hay tareas en esta vista" detail="Cambia el filtro o crea una nueva tarea de produccion." /> : null}
@@ -1153,10 +1154,12 @@ function ConsumptionTab({
 function CompactTaskRow({
   task,
   highlighted,
+  isSharedAccount = false,
   onOpen,
 }: {
   task: ProductionTask;
   highlighted?: boolean;
+  isSharedAccount?: boolean;
   onOpen: () => void;
 }) {
   const statusAccent: Record<ProductionTaskStatus, string> = {
@@ -1189,11 +1192,16 @@ function CompactTaskRow({
           <PriorityBadge priority={task.priority} />
         </span>
         <strong>{task.title}</strong>
+        {task.notes ? (
+          <span className="compact-task-row__notes mt-1 block text-left text-xs font-semibold text-neutral-600 line-clamp-2">
+            <span className="font-extrabold text-neutral-900">Indicaciones: </span>{task.notes}
+          </span>
+        ) : null}
         <span className="compact-task-row__meta">
           <span>{task.assigned_to || "Sin responsable"}</span>
-          {task.cost_center_codes?.length ? <span>CC {task.cost_center_codes.join(", ")}</span> : null}
-          <span>{task.process_type}</span>
-          <span>{formatEstimatedHours(task.estimated_minutes)}</span>
+          {task.cost_center_codes?.length && !isSharedAccount ? <span>CC {task.cost_center_codes.join(", ")}</span> : null}
+          {!isSharedAccount ? <span>{task.process_type}</span> : null}
+          {!isSharedAccount ? <span>{formatEstimatedHours(task.estimated_minutes)}</span> : null}
         </span>
       </span>
       <span className="compact-task-row__progress">
