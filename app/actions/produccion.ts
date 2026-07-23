@@ -540,6 +540,43 @@ export async function updateProductionTaskCostCenters(taskId: string, costCenter
   revalidatePath("/");
 }
 
+export async function updateProductionTaskResponsibles(taskId: string, responsibleNames: string[]): Promise<void> {
+  const supabase = await createClient();
+  const performedBy = await requireTaskCostCenterEditor(supabase);
+  const cleanTaskId = clean(taskId);
+  if (!cleanTaskId) throw new Error("No se encontro la tarea.");
+
+  const cleanedNames = responsibleNames.map((name) => clean(name)).filter(Boolean);
+  if (!cleanedNames.length) throw new Error("Selecciona al menos un responsable.");
+
+  const { data: task, error: taskError } = await supabase
+    .from("production_tasks")
+    .select("id,task_number,title,status")
+    .eq("id", cleanTaskId)
+    .single();
+  if (taskError || !task) throwSupabaseError("consultar la tarea de produccion", taskError ?? {});
+
+  if (!["pendiente", "en_proceso", "pausada"].includes(task.status)) {
+    throw new Error("Solo se pueden cambiar responsables en tareas pendientes, en proceso o pausadas.");
+  }
+
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("production_tasks")
+    .update({ assigned_to: cleanedNames.join(", "), updated_at: now })
+    .eq("id", cleanTaskId);
+  if (error) throwSupabaseError("actualizar los responsables de la tarea", error);
+
+  await insertTaskEvent(
+    supabase,
+    cleanTaskId,
+    "responsables_actualizados",
+    cleanedNames.join(", "),
+    performedBy,
+  );
+  revalidatePath("/");
+}
+
 export async function updateProductionTaskStatus(id: string, status: ProductionTaskStatus, notes?: string | null, performedById?: string): Promise<void> {
   if (status === "cancelada") {
     throw new Error("Para eliminar una tarea debes usar la confirmacion con codigo.");

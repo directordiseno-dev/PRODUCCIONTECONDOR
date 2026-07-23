@@ -13,6 +13,7 @@ import {
   recordProductionOvertime,
   updateInventoryItem,
   updateProductionTaskCostCenters,
+  updateProductionTaskResponsibles,
   updateProductionSubtaskStatus,
   updateProductionTaskStatus,
 } from "@/app/actions/produccion";
@@ -120,6 +121,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
   const [consumptionTaskId, setConsumptionTaskId] = useState("");
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [taskCostCenterPendingEdit, setTaskCostCenterPendingEdit] = useState<ProductionTask | null>(null);
+  const [taskResponsiblePendingEdit, setTaskResponsiblePendingEdit] = useState<ProductionTask | null>(null);
   const [taskPendingDeletion, setTaskPendingDeletion] = useState<ProductionTask | null>(null);
   const [pauseTarget, setPauseTarget] = useState<PauseTarget | null>(null);
   const [highlightedTaskId, setHighlightedTaskId] = useState("");
@@ -137,6 +139,7 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
   const activeOperatorName = usesSharedProductionAccount ? activeOperator?.name || userName : userName;
   const receivesNewTaskNotifications = usesSharedProductionAccount || isTaskSupervisorEmail(email);
   const canEditTaskCostCenters = isTaskCostCenterEditor(email, userName) && data.advancedPlanningReady;
+  const canEditTaskResponsibles = isTaskCostCenterEditor(email, userName);
   const operatorPickerEmployees = operatorPickerMode === "task_creation"
     ? data.employees.filter((employee) => !isExcludedSharedTaskCreator(employee))
     : data.employees;
@@ -347,8 +350,11 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
               timeTrackingReady={data.timeTrackingReady}
               advancedPlanningReady={data.advancedPlanningReady}
               canEditCostCenters={canEditTaskCostCenters}
+              canEditResponsibles={canEditTaskResponsibles}
+              employees={data.employees}
               onConsumeTask={openConsumption}
               onEditCostCenters={setTaskCostCenterPendingEdit}
+              onEditResponsibles={setTaskResponsiblePendingEdit}
               onStatus={(task, status) => {
                 if (status === "pausada") {
                   setPauseTarget({ kind: "task", task });
@@ -476,6 +482,30 @@ export function ProductionWorkspace({ data, email, userName }: { data: Productio
               () => updateProductionTaskCostCenters(taskCostCenterPendingEdit.id, codes),
               "Centros de costo actualizados.",
               () => setTaskCostCenterPendingEdit(null),
+            )}
+          />
+        ) : null}
+      </WorkspaceModalPanel>
+
+      <WorkspaceModalPanel
+        open={Boolean(taskResponsiblePendingEdit)}
+        title="Cambiar responsables"
+        detail="Solo Matius, Daniel o pueden cambiar responsables de tareas en proceso, pendientes o pausadas."
+        onClose={() => setTaskResponsiblePendingEdit(null)}
+        wide
+      >
+        {taskResponsiblePendingEdit ? (
+          <TaskResponsibleEditForm
+            key={taskResponsiblePendingEdit.id}
+            task={taskResponsiblePendingEdit}
+            employees={data.employees}
+            pending={isPending}
+            onCancel={() => setTaskResponsiblePendingEdit(null)}
+            onSubmit={(names) => runAction(
+              "Actualizando responsables...",
+              () => updateProductionTaskResponsibles(taskResponsiblePendingEdit.id, names),
+              "Responsables actualizados.",
+              () => setTaskResponsiblePendingEdit(null),
             )}
           />
         ) : null}
@@ -807,8 +837,11 @@ function TasksTab({
   timeTrackingReady,
   advancedPlanningReady,
   canEditCostCenters,
+  canEditResponsibles,
+  employees,
   onConsumeTask,
   onEditCostCenters,
+  onEditResponsibles,
   onStatus,
   onSubtaskStatus,
   onDelete,
@@ -820,8 +853,11 @@ function TasksTab({
   timeTrackingReady: boolean;
   advancedPlanningReady: boolean;
   canEditCostCenters: boolean;
+  canEditResponsibles: boolean;
+  employees: ProductionEmployeeOption[];
   onConsumeTask: (taskId?: string) => void;
   onEditCostCenters: (task: ProductionTask) => void;
+  onEditResponsibles: (task: ProductionTask) => void;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
   onSubtaskStatus: (subtask: ProductionSubtask, status: ProductionTaskStatus) => void;
   onDelete: (task: ProductionTask) => void;
@@ -960,6 +996,7 @@ function TasksTab({
           timeTrackingReady={timeTrackingReady}
           overtimeReady={advancedPlanningReady}
           canEditCostCenters={canEditCostCenters}
+          canEditResponsibles={canEditResponsibles}
           onStatus={onStatus}
           onSubtaskStatus={onSubtaskStatus}
           onDelete={(task) => {
@@ -973,6 +1010,10 @@ function TasksTab({
           onEditCostCenters={() => {
             setSelectedTaskId("");
             onEditCostCenters(selectedTask);
+          }}
+          onEditResponsibles={() => {
+            setSelectedTaskId("");
+            onEditResponsibles(selectedTask);
           }}
           onRecordOvertime={() => onRecordOvertime(selectedTask)}
         />
@@ -1138,11 +1179,13 @@ function TaskRow({
   timeTrackingReady = false,
   overtimeReady = false,
   canEditCostCenters = false,
+  canEditResponsibles = false,
   onStatus,
   onSubtaskStatus = () => undefined,
   onDelete,
   onConsume,
   onEditCostCenters,
+  onEditResponsibles,
   onRecordOvertime,
 }: {
   task: ProductionTask;
@@ -1153,11 +1196,13 @@ function TaskRow({
   timeTrackingReady?: boolean;
   overtimeReady?: boolean;
   canEditCostCenters?: boolean;
+  canEditResponsibles?: boolean;
   onStatus: (task: ProductionTask, status: ProductionTaskStatus) => void;
   onSubtaskStatus?: (subtask: ProductionSubtask, status: ProductionTaskStatus) => void;
   onDelete?: (task: ProductionTask) => void;
   onConsume?: () => void;
   onEditCostCenters?: () => void;
+  onEditResponsibles?: () => void;
   onRecordOvertime?: () => void;
 }) {
   const statusAccent: Record<ProductionTaskStatus, string> = {
@@ -1290,6 +1335,11 @@ function TaskRow({
             Cambiar CC
           </button>
         ) : null}
+        {canEditResponsibles && onEditResponsibles && ["pendiente", "en_proceso", "pausada"].includes(task.status) ? (
+          <button type="button" className="btn-secondary h-11 px-3 text-sm" disabled={pending} onClick={onEditResponsibles}>
+            Cambiar responsables
+          </button>
+        ) : null}
         {onConsume && !["revisada", "cancelada"].includes(task.status) ? (
           <button type="button" className="btn-quiet h-11 px-3 text-sm" disabled={pending} onClick={onConsume}>
             + Consumo
@@ -1410,6 +1460,82 @@ function TaskCostCenterEditForm({
         <button type="button" className="btn-secondary h-12" disabled={pending} onClick={onCancel}>Cancelar</button>
         <button type="submit" className="btn-primary h-12" disabled={pending || !codes.length || !hasChanges}>
           {pending ? "Guardando..." : "Guardar centros"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function TaskResponsibleEditForm({
+  task,
+  employees,
+  pending,
+  onCancel,
+  onSubmit,
+}: {
+  task: ProductionTask;
+  employees: ProductionEmployeeOption[];
+  pending: boolean;
+  onCancel: () => void;
+  onSubmit: (names: string[]) => void;
+}) {
+  const initialNames = (task.assigned_to || "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+  const [selectedNames, setSelectedNames] = useState<string[]>(initialNames);
+  const assignableEmployees = employees.filter((employee) => {
+    return employee.roles.some((role) => role === "operario" || role === "ingeniero");
+  });
+  const hasChanges = [...selectedNames].sort().join("|") !== [...initialNames].sort().join("|");
+
+  function toggleEmployee(name: string) {
+    setSelectedNames((prev) =>
+      prev.includes(name)
+        ? prev.filter((n) => n !== name)
+        : [...prev, name],
+    );
+  }
+
+  return (
+    <form
+      className="modal-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (selectedNames.length && hasChanges) onSubmit(selectedNames);
+      }}
+    >
+      <div className="modal-hint">
+        <strong>TP-{String(task.task_number || 0).padStart(4, "0")} · {task.title}</strong>
+        <span> Selecciona los operarios o ingenieros responsables de esta tarea.</span>
+      </div>
+      <div className="employee-multi-select">
+        <div className="employee-multi-select__heading">
+          <span className="label">Responsables de la tarea</span>
+          <small>{selectedNames.length ? `${selectedNames.length} seleccionado${selectedNames.length === 1 ? "" : "s"}` : "Selecciona al menos uno"}</small>
+        </div>
+        <div className="employee-check-grid">
+          {assignableEmployees.map((employee) => {
+            const checked = selectedNames.includes(employee.name);
+            return (
+              <label key={employee.id} className={cn("employee-check", checked && "is-selected")}>
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggleEmployee(employee.name)}
+                />
+                <span>{employee.name}</span>
+              </label>
+            );
+          })}
+          {!assignableEmployees.length ? <small>No hay operarios o ingenieros disponibles.</small> : null}
+        </div>
+      </div>
+      {!selectedNames.length ? <div className="form-error" role="alert">Debes seleccionar al menos un responsable.</div> : null}
+      <div className="grid grid-cols-2 gap-3">
+        <button type="button" className="btn-secondary h-12" disabled={pending} onClick={onCancel}>Cancelar</button>
+        <button type="submit" className="btn-primary h-12" disabled={pending || !selectedNames.length || !hasChanges}>
+          {pending ? "Guardando..." : "Guardar responsables"}
         </button>
       </div>
     </form>
