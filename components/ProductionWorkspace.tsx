@@ -1045,9 +1045,9 @@ function TasksTab({
             setSelectedTaskId("");
             onEditResponsibles(selectedTask);
           }}
-          onEditSubtaskResponsibles={(subtask) => {
+          onEditSubtaskResponsibles={(subtask, task) => {
             setSelectedTaskId("");
-            onEditSubtaskResponsibles(subtask, selectedTask);
+            onEditSubtaskResponsibles(subtask, task);
           }}
           onRecordOvertime={() => onRecordOvertime(selectedTask)}
         />
@@ -1238,7 +1238,7 @@ function TaskRow({
   onConsume?: () => void;
   onEditCostCenters?: () => void;
   onEditResponsibles?: () => void;
-  onEditSubtaskResponsibles?: (subtask: ProductionSubtask) => void;
+  onEditSubtaskResponsibles?: (subtask: ProductionSubtask, task: ProductionTask) => void;
   onRecordOvertime?: () => void;
 }) {
   const statusAccent: Record<ProductionTaskStatus, string> = {
@@ -1332,9 +1332,9 @@ function TaskRow({
                   key={subtask.id}
                   subtask={subtask}
                   pending={pending}
-                  canEdit={Boolean(canEditResponsibles && onEditSubtaskResponsibles && ["pendiente", "en_proceso", "pausada"].includes(subtask.status))}
+                  canEdit={Boolean(canEditResponsibles && onEditSubtaskResponsibles && ["pendiente", "en_proceso", "pausada"].includes(task.status))}
                   onStatus={(status) => onSubtaskStatus(subtask, status)}
-                  onEditResponsibles={onEditSubtaskResponsibles ? () => onEditSubtaskResponsibles(subtask) : undefined}
+                  onEditResponsibles={onEditSubtaskResponsibles ? () => onEditSubtaskResponsibles(subtask, task) : undefined}
                 />
               ))}
             </div>
