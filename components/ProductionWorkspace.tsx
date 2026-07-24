@@ -1173,6 +1173,23 @@ function groupTasksByFinishedDay(tasks: ProductionTask[]): Array<{ key: string; 
   tasks.forEach((task) => {
     const activeDays = new Set<string>();
 
+    if (task.started_at) {
+      const startKey = getLocalDateStr(task.started_at);
+      const endKey = getLocalDateStr(task.finished_at || Date.now());
+      if (startKey && endKey) {
+        let current = new Date(`${startKey}T12:00:00-05:00`);
+        const target = new Date(`${endKey}T12:00:00-05:00`);
+        const maxIterations = 365;
+        let iterations = 0;
+        while (current.getTime() <= target.getTime() && iterations < maxIterations) {
+          const dayKey = keyFormatter.format(current);
+          activeDays.add(dayKey);
+          current.setDate(current.getDate() + 1);
+          iterations++;
+        }
+      }
+    }
+
     if (task.finished_at) {
       const day = getLocalDateStr(task.finished_at);
       if (day) activeDays.add(day);
@@ -1203,13 +1220,8 @@ function groupTasksByFinishedDay(tasks: ProductionTask[]): Array<{ key: string; 
     });
 
     if (activeDays.size === 0) {
-      if (task.started_at) {
-        const startDay = getLocalDateStr(task.started_at);
-        if (startDay) activeDays.add(startDay);
-      } else {
-        const fallbackDay = getLocalDateStr(task.updated_at || task.created_at);
-        if (fallbackDay) activeDays.add(fallbackDay);
-      }
+      const fallbackDay = getLocalDateStr(task.updated_at || task.created_at);
+      if (fallbackDay) activeDays.add(fallbackDay);
     }
 
     activeDays.forEach((dayKey) => {
@@ -1498,11 +1510,12 @@ function TaskRow({
             <SubtaskProgressBar subtasks={task.subtasks} />
             <div className="task-subtasks__list">
               {task.subtasks.map((subtask) => (
-<SubtaskRow
+                <SubtaskRow
                   key={subtask.id}
                   subtask={subtask}
                   pending={pending}
                   canEdit={Boolean(canEditResponsibles && onEditSubtaskResponsibles && ["pendiente", "en_proceso", "pausada"].includes(task.status))}
+                  isSharedAccount={isSharedAccount}
                   onStatus={(status) => onSubtaskStatus(subtask, status)}
                   onEditResponsibles={onEditSubtaskResponsibles ? () => onEditSubtaskResponsibles(subtask, task) : undefined}
                 />
@@ -1510,7 +1523,7 @@ function TaskRow({
             </div>
           </section>
         ) : null}
-        {["terminada", "revisada"].includes(task.status) ? (
+        {!isSharedAccount && task.started_at ? (
           <TaskTimingSummary task={task} timeTrackingReady={timeTrackingReady} defaultOpen={readOnly} />
         ) : null}
         {overtimeReady && !readOnly ? (
@@ -1922,9 +1935,11 @@ function TaskTimingSummary({ task, timeTrackingReady, defaultOpen = false }: { t
     : Date.parse(task.started_at || "");
   const finishedAtMs = Number.isFinite(Date.parse(task.finished_at || ""))
     ? Date.parse(task.finished_at || "")
-    : sessionEndTimes.length
-      ? Math.max(...sessionEndTimes)
-      : Number.NaN;
+    : !["terminada", "revisada", "cancelada"].includes(task.status)
+      ? Date.now()
+      : sessionEndTimes.length
+        ? Math.max(...sessionEndTimes)
+        : Number.NaN;
   const activeMs = task.work_sessions.length
     ? sumSessionDuration(task.work_sessions, finishedAtMs)
     : Number.NaN;
@@ -2134,12 +2149,14 @@ function SubtaskRow({
   subtask,
   pending,
   canEdit = false,
+  isSharedAccount = false,
   onStatus,
   onEditResponsibles,
 }: {
   subtask: ProductionSubtask;
   pending: boolean;
   canEdit?: boolean;
+  isSharedAccount?: boolean;
   onStatus: (status: ProductionTaskStatus) => void;
   onEditResponsibles?: () => void;
 }) {
@@ -2192,6 +2209,34 @@ function SubtaskRow({
           </div>
         ) : null}
         {subtask.attachments.length ? <AttachmentLinks attachments={subtask.attachments} /> : null}
+        {!isSharedAccount && subtask.work_sessions && subtask.work_sessions.length > 0 ? (
+          <details className="mt-2 text-xs text-neutral-600 bg-white/60 p-2.5 rounded-lg border border-neutral-200">
+            <summary className="cursor-pointer font-bold select-none text-neutral-800 hover:text-tecondor-magenta transition-colors flex items-center gap-1.5">
+              <span>Historial de actividad ({subtask.work_sessions.length})</span>
+            </summary>
+            <ul className="mt-2 space-y-1.5 pl-1.5 border-l-2 border-neutral-200">
+              {subtask.work_sessions.map((session) => {
+                const started = formatWorkTimestamp(Date.parse(session.started_at));
+                const ended = session.ended_at ? formatWorkTimestamp(Date.parse(session.ended_at)) : "Activo";
+                const reason = session.end_reason ? ` (${session.end_reason.replace(/^Pausa:\s*/, "")})` : "";
+                const actor = session.ended_by ? ` por ${session.ended_by}` : "";
+                return (
+                  <li key={session.id} className="text-[11px] leading-tight text-neutral-700">
+                    <span className="font-semibold text-neutral-900">{started}</span>
+                    <span className="mx-1 text-neutral-400">→</span>
+                    <span className={session.ended_at ? "text-neutral-700" : "text-emerald-600 font-extrabold"}>{ended}</span>
+                    {reason || actor ? (
+                      <span className="text-neutral-500 block text-[10px] mt-0.5 pl-1 bg-neutral-100/50 rounded-sm">
+                        {reason}
+                        {actor}
+                      </span>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </details>
+        ) : null}
       </div>
       <div className="subtask-row__actions">
         {["pendiente", "pausada"].includes(subtask.status) ? (
