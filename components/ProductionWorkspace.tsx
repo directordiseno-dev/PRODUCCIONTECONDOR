@@ -980,7 +980,7 @@ function TasksTab({
   const [costCenterFilter, setCostCenterFilter] = useState("");
   const [selectedTaskId, setSelectedTaskId] = useState("");
   const historyTasks = useMemo(() => tasks
-    .filter((task) => ["terminada", "revisada"].includes(task.status))
+    .filter((task) => !["pendiente", "cancelada"].includes(task.status))
     .sort((left, right) => Date.parse(right.finished_at || right.updated_at) - Date.parse(left.finished_at || left.updated_at)), [tasks]);
   const statusFilteredTasks = useMemo(() => filter === "todas"
     ? tasks
@@ -1142,7 +1142,7 @@ function TasksTab({
 }
 
 function groupTasksByFinishedDay(tasks: ProductionTask[]): Array<{ key: string; label: string; tasks: ProductionTask[] }> {
-  const groups = new Map<string, { key: string; label: string; tasks: ProductionTask[] }>();
+  const groups = new Map<string, { key: string; label: string; tasks: Map<string, ProductionTask> }>();
   const keyFormatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Bogota",
     year: "numeric",
@@ -1157,17 +1157,79 @@ function groupTasksByFinishedDay(tasks: ProductionTask[]): Array<{ key: string; 
     year: "numeric",
   });
 
+  const getLocalDateStr = (dateInput: string | Date | number | null | undefined) => {
+    if (!dateInput) return null;
+    const d = new Date(dateInput);
+    return Number.isFinite(d.getTime()) ? keyFormatter.format(d) : null;
+  };
+
+  const getLocalLabel = (dateKey: string) => {
+    const dateObj = new Date(`${dateKey}T12:00:00-05:00`); 
+    if (!Number.isFinite(dateObj.getTime())) return "Sin fecha";
+    const rawLabel = labelFormatter.format(dateObj);
+    return rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1);
+  };
+
   tasks.forEach((task) => {
-    const date = new Date(task.finished_at || task.updated_at || task.created_at);
-    const key = Number.isFinite(date.getTime()) ? keyFormatter.format(date) : "sin-fecha";
-    const rawLabel = Number.isFinite(date.getTime()) ? labelFormatter.format(date) : "Sin fecha";
-    const label = rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1);
-    const current = groups.get(key) ?? { key, label, tasks: [] };
-    current.tasks.push(task);
-    groups.set(key, current);
+    const activeDays = new Set<string>();
+
+    if (task.finished_at) {
+      const day = getLocalDateStr(task.finished_at);
+      if (day) activeDays.add(day);
+    }
+
+    task.work_sessions?.forEach((session) => {
+      if (session.started_at) {
+        const startDay = getLocalDateStr(session.started_at);
+        if (startDay) activeDays.add(startDay);
+      }
+      if (session.ended_at) {
+        const endDay = getLocalDateStr(session.ended_at);
+        if (endDay) activeDays.add(endDay);
+      }
+    });
+
+    task.subtasks?.forEach((subtask) => {
+      subtask.work_sessions?.forEach((session) => {
+        if (session.started_at) {
+          const startDay = getLocalDateStr(session.started_at);
+          if (startDay) activeDays.add(startDay);
+        }
+        if (session.ended_at) {
+          const endDay = getLocalDateStr(session.ended_at);
+          if (endDay) activeDays.add(endDay);
+        }
+      });
+    });
+
+    if (activeDays.size === 0) {
+      if (task.started_at) {
+        const startDay = getLocalDateStr(task.started_at);
+        if (startDay) activeDays.add(startDay);
+      } else {
+        const fallbackDay = getLocalDateStr(task.updated_at || task.created_at);
+        if (fallbackDay) activeDays.add(fallbackDay);
+      }
+    }
+
+    activeDays.forEach((dayKey) => {
+      let group = groups.get(dayKey);
+      if (!group) {
+        const label = getLocalLabel(dayKey);
+        group = { key: dayKey, label, tasks: new Map<string, ProductionTask>() };
+        groups.set(dayKey, group);
+      }
+      group.tasks.set(task.id, task);
+    });
   });
 
-  return Array.from(groups.values());
+  return Array.from(groups.values())
+    .map((g) => ({
+      key: g.key,
+      label: g.label,
+      tasks: Array.from(g.tasks.values()),
+    }))
+    .sort((a, b) => b.key.localeCompare(a.key));
 }
 
 function ConsumptionTab({
@@ -1393,6 +1455,10 @@ function TaskRow({
                 <span><small>Proceso</small><b>{task.process_type}</b></span>
                 <span><small>Tiempo aprox.</small><b>{formatEstimatedHours(task.estimated_minutes)}</b></span>
                 <span><small>Creada por</small><b>{createdByLabel(task.created_by)}</b></span>
+                <span>
+                  <small>Inició el</small>
+                  <b>{task.started_at ? formatWorkTimestamp(Date.parse(task.started_at)) : "Sin iniciar"}</b>
+                </span>
               </div>
             ) : null}
           </div>
